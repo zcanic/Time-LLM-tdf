@@ -73,3 +73,21 @@
 - Files used:
   `.gitignore` added
   `change.md` modified
+- Tightened `plan.md` to reflect the clarified research constraints: GPT-2 first, weather as prompt-only context, and Baidu index strictly lagged so same-day values are never visible.
+- Purpose: align the implementation plan with the final causal assumptions before any training code is changed.
+- Impact: the plan now fixes the initial backbone choice and narrows variable roles more strictly against leakage.
+- Files used:
+  `plan.md` modified
+  `change.md` modified
+- Extended `plan.md` to allow engineered forecasting features while explicitly requiring all rolling windows to be backward-only.
+- Purpose: capture the new feature-engineering direction without weakening the leakage rules.
+- Impact: the plan now treats momentum, moving-average, slope, volatility, and relative-position features as optional later-stage numeric features under strict past-only window constraints.
+- Files used:
+  `plan.md` modified
+  `change.md` modified
+- Added a dedicated feature-engineering script for the park-aligned dataset with detailed inline comments explaining each processing step and the leakage boundary.
+- Purpose: create a reviewable, reproducible path to append backward-only engineered features and lagged-Baidu features into a new CSV.
+- Impact: introduces a separate feature-building entry point that preserves the base table and writes an enriched dataset file.
+- Files used:
+  `data_process_and_data_to_use/build_features.py` added
+  `change.md` modified

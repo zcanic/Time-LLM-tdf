@@ -17,9 +17,9 @@ The most important constraint is not the model idea itself. The main constraint 
 
 The safe interpretation is:
 - target: `number`
-- numeric history input: past `number`, and optionally past/present-known Baidu index features
+- numeric history input: past `number`, and lagged Baidu index features only
 - prompt input: weather, holiday, traffic status, environment description, and other date-aligned context converted into text
-- forbidden input: any future `number`, future Baidu index, or any prompt content built from future timestamps
+- forbidden input: any future `number`, same-day or future Baidu index, or any prompt content built from future timestamps
 
 This is feasible if the pipeline is redesigned so that every training sample is constructed only from information available up to the forecast origin.
 
@@ -29,8 +29,8 @@ This is feasible if the pipeline is redesigned so that every training sample is 
 
 Use a single-target forecasting setup where:
 - the model predicts only `number`
-- Baidu index enters as a numeric covariate available only up to the current timestamp
-- weather and holiday metadata are treated as prompt context
+- Baidu index enters as a numeric covariate only after an explicit lag
+- weather and holiday metadata are treated as prompt context only
 - traffic status and environment description are treated carefully, because they come from the same park-side source and may behave more like concurrent observations than truly exogenous signals
 
 Why this is the recommended setup:
@@ -66,8 +66,10 @@ Your stated idea is valid:
 - but only if the sample only sees the part of the Baidu series that would be known by time `t`
 
 This means:
-- use lagged or aligned historical Baidu values
+- use explicitly lagged historical Baidu values only
+- do not use the same-day Baidu value
 - do not inject Baidu values from forecast horizon timestamps into model input
+- default to a one-day lag first, then only relax that rule if you intentionally redesign the causal assumption
 
 ### 3. Prompt leakage
 
@@ -78,11 +80,13 @@ Safe prompt content:
 - historical summary statistics computed from the input window only
 - holiday labels for timestamps that are already within the observed input side
 - weather summaries from the observed side only
+- text summaries of engineered behavior only if those summaries are built from past-only windows
 
 Unsafe prompt content:
 - summaries over the full day when the prediction origin is inside that day
 - future holiday labels for forecast timestamps unless you intentionally define them as known-in-advance calendar covariates
 - future weather facts unless they are coming from a separate forecast product and you intentionally treat them as known future covariates
+- any rolling summary built with centered or forward-looking windows
 
 ## Variable Role Plan
 
@@ -94,17 +98,47 @@ Unsafe prompt content:
 
 Phase 1 numeric covariates:
 - `number`
-- `baidu_PC+移动指数`
-- optional: `baidu_移动指数`
-- optional: `baidu_PC指数`
+- lagged `baidu_PC+移动指数`
 
 Recommendation:
-- start with only one Baidu series, preferably `baidu_PC+移动指数`
-- add the other two later only if needed
+- start with only one Baidu series, `baidu_PC+移动指数`, after applying a lag
+- do not start with the other two Baidu variants
 
 Reason:
 - they are highly related and may be redundant
 - fewer covariates make leakage audits easier
+- your current research intent does not require multiple Baidu channels at the start
+
+### Engineered time-series features
+
+These are allowed as a later enhancement layer, especially borrowing ideas from
+financial forecasting, for example:
+- change features
+- momentum
+- short and long moving-average relationships
+- rolling slope
+- rolling volatility
+- relative position inside a past window
+
+Recommendation:
+- do not start with a large feature bank
+- add a small, interpretable subset after the leakage-safe base pipeline is already working
+- treat these as numeric branch features, not prompt features
+
+Hard rule:
+- every rolling or window-based feature must be computed using past-only information
+- rolling windows may only look backward
+- no centered windows
+- no future rows
+- no full-day summary that includes timestamps after the forecast origin
+
+This rule applies to:
+- moving averages
+- momentum
+- rolling slope
+- rolling standard deviation
+- rolling min/max based relative position
+- any derived feature based on local window statistics
 
 ### Prompt-only context
 
@@ -113,6 +147,10 @@ Good candidates:
 - weather fields
 - `交通状况`
 - `环境描述`
+
+Explicit rule:
+- weather values stay in the prompt/context path only
+- weather values do not enter the numeric time-series branch
 
 But there is an important caution:
 - `交通状况` and `环境描述` are likely synchronous observations from the same source stream as the park signal
@@ -130,7 +168,7 @@ Implication:
 
 Recommended backbone order:
 1. `GPT2`
-2. `BERT`
+2. `BERT` only if GPT-2 fails to provide usable behavior
 3. only consider larger models later if the pipeline is already proven and memory strategy is redesigned
 
 Recommended starting point:
@@ -156,7 +194,8 @@ Needed changes:
 - define `number` as the only prediction target
 - create a custom loader that builds samples from minute-level rows
 - ensure each sample uses a past window and predicts a future horizon
-- ensure Baidu values are only taken from the observed side
+- create a lagged Baidu feature and ensure same-day Baidu is never visible to the sample
+- if engineered features are added, compute them with backward-only rolling windows before sample extraction
 
 Success criterion:
 - a reproducible train/val/test pipeline that produces valid windows
@@ -167,12 +206,28 @@ Objective:
 - control which variables go into the numerical time-series branch and which go into the text prompt
 
 Needed changes:
-- numeric branch receives `number` and selected Baidu history
+- numeric branch receives `number` and lagged Baidu history only
 - prompt builder receives weather/holiday/traffic/environment information only from the observed window
 - prompt builder must not inspect future rows
+- prompt builder must keep weather in text form only, not as numeric model input
 
 Success criterion:
 - for any sample, it is possible to explain exactly why each input field is available at forecast time
+
+### Phase 2.5: add engineered features conservatively
+
+Objective:
+- improve the numeric branch with interpretable state features without breaking causality
+
+Needed changes:
+- add a small first batch of engineered features derived from `number`
+- prefer features like change, momentum, moving-average spread, rolling volatility, and relative position
+- ensure all such features are built with backward-only windows
+- validate feature availability row by row before training
+
+Success criterion:
+- every engineered feature can be traced to past-only source rows
+- the feature set remains small enough to audit manually
 
 ### Phase 3: make the runtime fit 4060 8G
 
@@ -217,7 +272,7 @@ Baselines to compare:
 - naive last-value baseline
 - DLinear baseline from the same repo
 - Time-LLM with no Baidu covariate
-- Time-LLM with Baidu covariate
+- Time-LLM with lagged Baidu covariate
 - Time-LLM with and without prompt context
 
 Why this matters:
@@ -236,8 +291,9 @@ Risk:
 
 Mitigation:
 - document the assumption explicitly
-- start with same-day historical alignment only
-- if needed, shift Baidu by one day for a stricter causal setup and compare results
+- enforce a lag so the same-day Baidu value is never visible
+- start with a one-day lag as the default causal assumption
+- only compare against less strict variants later if you explicitly want that ablation
 
 ### Risk 2
 
@@ -264,6 +320,19 @@ Mitigation:
 - precompute lightweight textual summaries
 - keep prompt length short
 
+### Risk 4
+
+Engineered features may silently leak if window logic is implemented carelessly.
+
+Risk:
+- rolling functions often look safe while accidentally including the current boundary incorrectly
+- centered windows or post-merge daily summaries can leak future information into minute-level rows
+
+Mitigation:
+- treat backward-only rolling windows as a non-negotiable rule
+- review feature code separately from model code
+- test engineered features with timestamp-level audits before training
+
 ## Recommended Execution Order
 
 1. Freeze the causal rules for each field.
@@ -271,8 +340,9 @@ Mitigation:
 3. Add an explicit prompt builder that uses observed-window-only context.
 4. Create a single-GPU GPT-2 training entry for smoke testing.
 5. Run a tiny overfit test on a small slice to validate shapes and leakage boundaries.
-6. Run a real chronological train/val/test experiment.
-7. Add ablations for Baidu and prompt context.
+6. Add a small batch of backward-only engineered features.
+7. Run a real chronological train/val/test experiment.
+8. Add ablations for lagged Baidu, engineered features, and prompt context.
 
 ## Bottom Line
 
@@ -280,9 +350,9 @@ Your research target is valid and technically feasible.
 
 The strongest version of the project is:
 - predict `number`
-- treat Baidu index as a history-only explanatory variable
+- treat Baidu index as a lagged history-only explanatory variable
 - treat weather/holiday/park metadata as controlled prompt context
 - enforce time-availability rules sample by sample
-- use a small backbone first because 4060 8G is the real engineering constraint
+- use GPT-2 first because 4060 8G is the real engineering constraint
 
 The next implementation should optimize for validity first, not model size or benchmark parity.
