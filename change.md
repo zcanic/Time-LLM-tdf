@@ -34,3 +34,28 @@
 - Files used:
   `data_process_and_data_to_use/validate_daily_pipeline.py` added
   `change.md` modified
+- Added `problems.md` with a detailed read-only review of the current training pipeline for custom-data readiness.
+- Purpose: capture hard-coded paths, magic numbers, unsafe behaviors, and invalid handling before making training changes.
+- Impact: provides a concrete problem list and refactor order without modifying the training pipeline itself.
+- Files used:
+  `problems.md` added
+  `run_main.py` reviewed
+  `run_pretrain.py` reviewed
+  `run_m4.py` reviewed
+  `models/TimeLLM.py` reviewed
+  `data_provider/data_factory.py` reviewed
+  `data_provider/data_loader.py` reviewed
+  `data_provider_pretrain/data_factory.py` reviewed
+  `data_provider_pretrain/data_loader.py` reviewed
+  `utils/tools.py` reviewed
+  `layers/Embed.py` reviewed
+  `scripts/TimeLLM_ETTh1.sh` reviewed
+  `change.md` modified
+- Updated the data merge pipeline so the Tiantan park CSV remains row-for-row unchanged and other sources align to it by date.
+- Purpose: preserve the park data as the immutable base table instead of aggregating it to daily granularity.
+- Impact: regenerated a row-level aligned dataset as `park_aligned_data.csv` and tightened validation around raw park row preservation.
+- Files used:
+  `data_process_and_data_to_use/merge_daily_data.py` modified
+  `data_process_and_data_to_use/validate_daily_pipeline.py` modified
+  `data_process_and_data_to_use/park_aligned_data.csv` added
+  `change.md` modified
