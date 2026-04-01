@@ -91,3 +91,9 @@
 - Files used:
   `data_process_and_data_to_use/build_features.py` added
   `change.md` modified
+- Added `数据处理问题.md` to document the full data-processing risk review for training readiness.
+- Purpose: record confirmed blocking and non-blocking issues from the read-only audit so training can use an explicit gate.
+- Impact: provides a single checklist-style risk document for pre-training decision making; no code or data file behavior changed.
+- Files used:
+  `数据处理问题.md` added
+  `change.md` modified
