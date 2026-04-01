@@ -59,3 +59,17 @@
   `data_process_and_data_to_use/validate_daily_pipeline.py` modified
   `data_process_and_data_to_use/park_aligned_data.csv` added
   `change.md` modified
+- Added `plan.md` to turn the research goal into a leakage-aware implementation plan tailored to the current dataset and 4060 8G hardware.
+- Purpose: define target, covariate roles, prompt usage, leakage rules, backbone choice, and execution order before code changes.
+- Impact: gives a concrete direction for the next implementation stage without modifying the training pipeline yet.
+- Files used:
+  `plan.md` added
+  `data_process_and_data_to_use/park_aligned_data.csv` reviewed
+  `problems.md` reviewed
+  `change.md` modified
+- Added a minimal `.gitignore` to keep Python cache files and notebook temp state out of the repo.
+- Purpose: prevent review noise and accidental commits of generated local artifacts.
+- Impact: future `__pycache__`, `.pyc`, and notebook checkpoint files will stay untracked.
+- Files used:
+  `.gitignore` added
+  `change.md` modified
