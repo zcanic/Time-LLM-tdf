@@ -21,7 +21,7 @@ The safe interpretation is:
 - prompt input: weather, holiday, traffic status, environment description, and other date-aligned context converted into text
 - forbidden input: any future `number`, same-day or future Baidu index, or any prompt content built from future timestamps
 
-This is feasible if the pipeline is redesigned so that every training sample is constructed only from information available up to the forecast origin.
+This is feasible if every training sample is constructed only from information available up to the forecast origin.
 
 ## Key Research Decision
 
@@ -98,11 +98,11 @@ Unsafe prompt content:
 
 Phase 1 numeric covariates:
 - `number`
-- lagged `baidu_PC+移动指数`
+- `feat_baidu_lag1d`
 
 Recommendation:
-- start with only one Baidu series, `baidu_PC+移动指数`, after applying a lag
-- do not start with the other two Baidu variants
+- start with only one Baidu series, represented by the already-safe lagged feature `feat_baidu_lag1d`
+- do not reintroduce raw same-day Baidu columns into the training-facing table
 
 Reason:
 - they are highly related and may be redundant
@@ -111,7 +111,7 @@ Reason:
 
 ### Engineered time-series features
 
-These are allowed as a later enhancement layer, especially borrowing ideas from
+These are now part of the current data-preparation direction, borrowing ideas from
 financial forecasting, for example:
 - change features
 - momentum
@@ -122,7 +122,7 @@ financial forecasting, for example:
 
 Recommendation:
 - do not start with a large feature bank
-- add a small, interpretable subset after the leakage-safe base pipeline is already working
+- keep the current feature set small and interpretable
 - treat these as numeric branch features, not prompt features
 
 Hard rule:
@@ -139,6 +139,11 @@ This rule applies to:
 - rolling standard deviation
 - rolling min/max based relative position
 - any derived feature based on local window statistics
+
+Current implementation direction:
+- `park_featured_data.csv` already contains a first batch of backward-only features
+- feature names use explicit row-based semantics such as `4row`, `16row`, `48row`, `96row`
+- on the current park source, `48` rows means 1 park day and `96` rows means 2 park days
 
 ### Prompt-only context
 
@@ -182,6 +187,38 @@ Why GPT-2 first:
 - easier to fit on 8 GB
 - enough to validate the data construction and prompting logic
 
+## Baseline Plan
+
+### XGBoost first
+
+Before investing in Time-LLM training, start with an `XGBoost` baseline.
+
+Why this should come first:
+- it validates the data pipeline before introducing LLM complexity
+- it is a strong fit for the current structured feature table
+- it is much cheaper to iterate on with local hardware
+- it gives a realistic reference point for judging whether Time-LLM adds value
+
+Recommended first XGBoost inputs:
+- `number`-derived engineered features
+- safe lagged Baidu features
+- optionally a small set of structured calendar fields
+
+Avoid in the first XGBoost baseline:
+- raw text fields
+- any same-day raw Baidu columns
+- uncontrolled automatic inclusion of all numeric columns
+
+Primary XGBoost ablations:
+- `number` features only
+- `number` features + lagged Baidu features
+- `number` features + lagged Baidu features + selected structured calendar features
+
+Interpretation goal:
+- determine whether the current feature set already explains the prediction target well
+- identify whether Baidu adds measurable value before moving to Time-LLM
+- establish a credible structured-model baseline for later comparison
+
 ## Model Adaptation Plan
 
 ### Phase 1: build a valid forecasting problem
@@ -190,12 +227,13 @@ Objective:
 - make Time-LLM consume your aligned park-based dataset without leakage
 
 Needed changes:
-- use `park_aligned_data.csv` as the source table
+- use `park_aligned_data.csv` as the immutable source table
 - define `number` as the only prediction target
 - create a custom loader that builds samples from minute-level rows
 - ensure each sample uses a past window and predicts a future horizon
-- create a lagged Baidu feature and ensure same-day Baidu is never visible to the sample
-- if engineered features are added, compute them with backward-only rolling windows before sample extraction
+- consume `park_featured_data.csv` as the training-facing feature table
+- keep same-day raw Baidu columns excluded from the training-facing feature table
+- keep engineered features backward-only before sample extraction
 
 Success criterion:
 - a reproducible train/val/test pipeline that produces valid windows
@@ -206,10 +244,11 @@ Objective:
 - control which variables go into the numerical time-series branch and which go into the text prompt
 
 Needed changes:
-- numeric branch receives `number` and lagged Baidu history only
+- numeric branch receives `number`, `feat_baidu_lag1d`, and a small audited set of engineered numeric features
 - prompt builder receives weather/holiday/traffic/environment information only from the observed window
 - prompt builder must not inspect future rows
 - prompt builder must keep weather in text form only, not as numeric model input
+- prompt builder should not read engineered numeric features as free-form text unless that transformation is explicitly reviewed
 
 Success criterion:
 - for any sample, it is possible to explain exactly why each input field is available at forecast time
@@ -219,10 +258,13 @@ Success criterion:
 Objective:
 - improve the numeric branch with interpretable state features without breaking causality
 
+Status:
+- a first batch already exists in `park_featured_data.csv`
+
 Needed changes:
-- add a small first batch of engineered features derived from `number`
-- prefer features like change, momentum, moving-average spread, rolling volatility, and relative position
-- ensure all such features are built with backward-only windows
+- audit which existing engineered columns are actually allowed into training
+- prefer the smallest high-signal subset first
+- keep all such features backward-only
 - validate feature availability row by row before training
 
 Success criterion:
@@ -243,6 +285,20 @@ Needed changes:
 
 Success criterion:
 - one end-to-end training run fits and finishes on local hardware
+
+### Phase 0: establish a structured baseline
+
+Objective:
+- validate the feature table and leakage boundary with a strong non-LLM model first
+
+Needed changes:
+- define a strict feature whitelist for tree-based training
+- create chronological train/val/test splits on the featured dataset
+- train an `XGBoost` baseline on the structured numeric features
+- compare variants with and without lagged Baidu features
+
+Success criterion:
+- a reproducible non-LLM baseline exists before Time-LLM experiments begin
 
 ## Data Split Plan
 
@@ -270,12 +326,14 @@ Primary metrics:
 
 Baselines to compare:
 - naive last-value baseline
+- `XGBoost` baseline
 - DLinear baseline from the same repo
 - Time-LLM with no Baidu covariate
 - Time-LLM with lagged Baidu covariate
 - Time-LLM with and without prompt context
 
 Why this matters:
+- it tells you whether a strong tabular model already solves most of the task
 - it tells you whether Baidu helps
 - it tells you whether prompt context helps
 - it tells you whether the LLM layer is actually buying anything over simpler baselines
@@ -294,6 +352,10 @@ Mitigation:
 - enforce a lag so the same-day Baidu value is never visible
 - start with a one-day lag as the default causal assumption
 - only compare against less strict variants later if you explicitly want that ablation
+
+Current state:
+- raw same-day Baidu columns have already been removed from the training-facing feature table
+- only lagged/safe Baidu-derived features remain there
 
 ### Risk 2
 
@@ -333,16 +395,22 @@ Mitigation:
 - review feature code separately from model code
 - test engineered features with timestamp-level audits before training
 
+Current state:
+- there is already a dedicated feature validation script for this layer
+- the remaining risk is no longer feature generation itself, but incorrect feature selection at training time
+
 ## Recommended Execution Order
 
 1. Freeze the causal rules for each field.
-2. Build a custom minute-level dataset loader from `park_aligned_data.csv`.
-3. Add an explicit prompt builder that uses observed-window-only context.
-4. Create a single-GPU GPT-2 training entry for smoke testing.
-5. Run a tiny overfit test on a small slice to validate shapes and leakage boundaries.
-6. Add a small batch of backward-only engineered features.
-7. Run a real chronological train/val/test experiment.
-8. Add ablations for lagged Baidu, engineered features, and prompt context.
+2. Define a strict training column whitelist from `park_featured_data.csv`.
+3. Build an `XGBoost` baseline on the whitelisted structured features.
+4. Run chronological ablations for lagged Baidu and engineered features.
+5. Build a custom minute-level dataset loader using the featured table for numeric inputs and the aligned contextual fields for prompt construction.
+6. Add an explicit prompt builder that uses observed-window-only context.
+7. Create a single-GPU GPT-2 training entry for smoke testing.
+8. Run a tiny overfit test on a small slice to validate shapes and leakage boundaries.
+9. Run a real chronological train/val/test experiment.
+10. Compare Time-LLM against the `XGBoost` and DLinear baselines.
 
 ## Bottom Line
 

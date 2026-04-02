@@ -105,3 +105,22 @@
 - Files used:
   `数据处理问题.md` added
   `change.md` modified
+- Updated `plan.md` to remove outdated future-tense assumptions and reflect the current data state after the feature-pipeline hardening.
+- Purpose: keep the implementation plan aligned with the actual featured dataset, safe Baidu exposure, and row-based window semantics.
+- Impact: the plan now treats lagged Baidu and the first engineered feature batch as existing inputs, and shifts the next work to training-column whitelisting and loader integration.
+- Files used:
+  `plan.md` modified
+  `data_process_and_data_to_use/park_featured_data.csv` reviewed
+  `change.md` modified
+- Updated `plan.md` to add an `XGBoost` baseline phase ahead of Time-LLM experiments.
+- Purpose: validate the structured feature table and leakage boundary with a strong non-LLM model before spending effort on GPT-2 training.
+- Impact: the execution order now prioritizes a chronological `XGBoost` baseline and treats it as the main reference point for later Time-LLM comparisons.
+- Files used:
+  `plan.md` modified
+  `change.md` modified
+- Deleted `数据处理问题.md` after confirming the current data-generation and validation chain status in subsequent reviews.
+- Purpose: remove an outdated standalone blocker summary and keep the repository documentation focused on current artifacts.
+- Impact: the dedicated issue summary document is no longer present in the repo; historical change trace remains in `change.md`.
+- Files used:
+  `数据处理问题.md` deleted
+  `change.md` modified
