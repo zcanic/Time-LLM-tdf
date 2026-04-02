@@ -14,22 +14,43 @@ DATA_DIR = ROOT / "data_process_and_data_to_use"
 INPUT_FILE = DATA_DIR / "park_aligned_data.csv"
 OUTPUT_FILE = DATA_DIR / "park_featured_data.csv"
 
+# The park source has a stable intraday grid of 48 rows per day:
+# 09:00, 09:15, ..., 20:45.
+# This constant is used to make window semantics explicit and reviewable.
+ROWS_PER_PARK_DAY = 48
+
+# These columns are considered unsafe to keep in the training-facing featured
+# table because they expose same-day Baidu information. The raw aligned file is
+# kept separately, so dropping them here does not destroy source data.
+RAW_BAIDU_COLUMNS = [
+    "baidu_关键词",
+    "baidu_城市代码",
+    "baidu_城市",
+    "baidu_数据类型",
+    "baidu_数据间隔(天)",
+    "baidu_所属年份",
+    "baidu_PC+移动指数",
+    "baidu_移动指数",
+    "baidu_PC指数",
+    "baidu_爬取时间",
+]
+
 
 def load_base_data() -> pd.DataFrame:
     """
-    Read the park-aligned base table without changing any original rows.
+    Read the park-aligned base table without changing any original park rows.
 
     Important design rule:
-    - `park_aligned_data.csv` is the immutable base table.
+    - `park_aligned_data.csv` is the immutable aligned source.
     - This script does not aggregate, drop, reorder, or resample the original
-      park rows.
-    - Every feature added later is appended as a new column on top of the same
-      row order.
+      park-side rows.
+    - The only structural changes are:
+      1. append engineered feature columns
+      2. remove raw same-day Baidu columns from the *featured* output only
 
-    This guarantees that downstream review can always compare:
-    - original park row i
-    - featured park row i
-    and confirm that only new columns were added.
+    Review implication:
+    - row i in the output must still correspond to row i in the base park table
+    - the park-side columns themselves must remain unchanged
     """
     df = pd.read_csv(INPUT_FILE)
     df["时间戳"] = pd.to_datetime(df["时间戳"], errors="raise")
@@ -38,41 +59,62 @@ def load_base_data() -> pd.DataFrame:
     return df
 
 
-def add_lagged_baidu_feature(df: pd.DataFrame) -> pd.DataFrame:
+def build_baidu_daily_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Build a strictly lagged Baidu feature.
+    Build Baidu features at the daily level before joining them back.
 
-    Why this exists:
-    - The research rule is that the model must not see the same-day Baidu value.
-    - Therefore we first collapse Baidu to one value per calendar day.
-    - Then we shift the daily series by exactly one day.
-    - Finally, we merge that lagged daily value back onto every minute-level row
-      of the corresponding day.
-
-    Example:
-    - all rows on 2022-11-19 receive the Baidu value from 2022-11-18
-    - all rows on 2022-11-18 receive NaN because there is no earlier day inside
-      the aligned park range
+    Why daily-first processing is required:
+    - Baidu is naturally daily data.
+    - If we compute rolling statistics after repeating a daily value onto every
+      minute row, the window length becomes hard to interpret.
+    - Daily-first processing keeps the time meaning explicit.
 
     Leakage rule:
-    - no row can read Baidu from its own date
-    - no row can read Baidu from a future date
+    - the model must not see the Baidu value from the same date
+    - therefore we shift the daily series by exactly one day first
+    - every feature in this function is derived from that lagged daily series
+
+    Semantics:
+    - `lag1d` means previous calendar day
+    - `ma_3d` means a backward-looking 3-day average over lagged daily values
+    - `ma_7d` means a backward-looking 7-day average over lagged daily values
     """
-    baidu_daily = (
+    daily = (
         df[["日期", "baidu_PC+移动指数"]]
         .drop_duplicates(subset=["日期"])
         .sort_values("日期")
         .reset_index(drop=True)
     )
-    baidu_daily["baidu_PC+移动指数_lag1d"] = baidu_daily["baidu_PC+移动指数"].shift(1)
 
-    df = df.merge(
-        baidu_daily[["日期", "baidu_PC+移动指数_lag1d"]],
-        on="日期",
-        how="left",
-        sort=False,
-    )
-    return df
+    daily["feat_baidu_lag1d"] = daily["baidu_PC+移动指数"].shift(1)
+    daily["feat_baidu_diff_1d"] = daily["feat_baidu_lag1d"].diff(1)
+    daily["feat_baidu_ma_3d"] = daily["feat_baidu_lag1d"].rolling(window=3, min_periods=3).mean()
+    daily["feat_baidu_ma_7d"] = daily["feat_baidu_lag1d"].rolling(window=7, min_periods=7).mean()
+    daily["feat_baidu_ma_spread_3d_7d"] = daily["feat_baidu_ma_3d"] - daily["feat_baidu_ma_7d"]
+
+    return daily[
+        [
+            "日期",
+            "feat_baidu_lag1d",
+            "feat_baidu_diff_1d",
+            "feat_baidu_ma_3d",
+            "feat_baidu_ma_7d",
+            "feat_baidu_ma_spread_3d_7d",
+        ]
+    ]
+
+
+def attach_baidu_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Attach the safe Baidu feature set back onto each minute-level park row.
+
+    Every minute row for the same date receives the same lagged daily Baidu
+    feature values. This is acceptable because the source signal itself is daily.
+    The critical safeguard is that the attached values are already lagged, so
+    the current date never sees its own Baidu value.
+    """
+    baidu_features = build_baidu_daily_features(df)
+    return df.merge(baidu_features, on="日期", how="left", sort=False)
 
 
 def rolling_slope(values: pd.Series, window: int) -> pd.Series:
@@ -110,113 +152,105 @@ def add_number_features(df: pd.DataFrame) -> pd.DataFrame:
     - they use the current row plus the past rows before it
     - they do not look into the future
 
-    Chosen windows:
-    - 4 rows  = about 1 hour  at 15-minute spacing
-    - 16 rows = about 4 hours at 15-minute spacing
-    - 96 rows = about 1 day   at 15-minute spacing
+    Window semantics are written against the actual park data cadence:
+    - 4 rows   = about 1 hour
+    - 16 rows  = about 4 hours
+    - 48 rows  = 1 full park day
+    - 96 rows  = 2 full park days
 
-    These windows are simple enough to inspect and map well to the current data.
+    The names use explicit row counts to avoid the earlier ambiguity where
+    `96` rows was casually described as "1 day".
     """
     number = df["number"].astype(float)
 
-    # One-step absolute change. This describes immediate local movement.
-    df["feat_number_diff_1"] = number.diff(1)
+    df["feat_number_diff_1row"] = number.diff(1)
 
-    # One-step relative change. This normalizes the move by the previous level.
-    # Replace exact zero denominators with NaN to avoid invalid infinite values.
     prev_number = number.shift(1).replace(0, np.nan)
-    df["feat_number_pct_change_1"] = (number - number.shift(1)) / prev_number
+    df["feat_number_pct_change_1row"] = (number - number.shift(1)) / prev_number
 
-    # Momentum over a short and medium history window.
-    # Definition here is "current value minus value k rows ago".
-    df["feat_number_momentum_4"] = number - number.shift(4)
-    df["feat_number_momentum_16"] = number - number.shift(16)
+    df["feat_number_momentum_4row"] = number - number.shift(4)
+    df["feat_number_momentum_16row"] = number - number.shift(16)
+    df["feat_number_momentum_48row"] = number - number.shift(ROWS_PER_PARK_DAY)
 
-    # Backward-looking moving averages.
-    # These windows include the current row and the history before it.
-    df["feat_number_ma_4"] = number.rolling(window=4, min_periods=4).mean()
-    df["feat_number_ma_16"] = number.rolling(window=16, min_periods=16).mean()
-    df["feat_number_ma_96"] = number.rolling(window=96, min_periods=96).mean()
+    df["feat_number_ma_4row"] = number.rolling(window=4, min_periods=4).mean()
+    df["feat_number_ma_16row"] = number.rolling(window=16, min_periods=16).mean()
+    df["feat_number_ma_48row"] = number.rolling(window=ROWS_PER_PARK_DAY, min_periods=ROWS_PER_PARK_DAY).mean()
+    df["feat_number_ma_96row"] = number.rolling(window=2 * ROWS_PER_PARK_DAY, min_periods=2 * ROWS_PER_PARK_DAY).mean()
 
-    # Short-vs-long moving-average relationship.
-    # This is a compact way to express local trend versus broader background.
-    df["feat_number_ma_spread_16_96"] = df["feat_number_ma_16"] - df["feat_number_ma_96"]
-    df["feat_number_ma_ratio_16_96"] = df["feat_number_ma_16"] / df["feat_number_ma_96"].replace(0, np.nan)
+    df["feat_number_ma_spread_16_48row"] = df["feat_number_ma_16row"] - df["feat_number_ma_48row"]
+    df["feat_number_ma_ratio_16_48row"] = df["feat_number_ma_16row"] / df["feat_number_ma_48row"].replace(0, np.nan)
 
-    # Rolling slope over two scales.
-    # This gives a directional trend estimate rather than only a level difference.
-    df["feat_number_slope_16"] = rolling_slope(number, 16)
-    df["feat_number_slope_96"] = rolling_slope(number, 96)
+    df["feat_number_slope_16row"] = rolling_slope(number, 16)
+    df["feat_number_slope_48row"] = rolling_slope(number, ROWS_PER_PARK_DAY)
 
-    # Rolling volatility using standard deviation.
-    # Again: backward-only, never future-looking.
-    df["feat_number_vol_16"] = number.rolling(window=16, min_periods=16).std()
-    df["feat_number_vol_96"] = number.rolling(window=96, min_periods=96).std()
+    df["feat_number_vol_16row"] = number.rolling(window=16, min_periods=16).std()
+    df["feat_number_vol_48row"] = number.rolling(window=ROWS_PER_PARK_DAY, min_periods=ROWS_PER_PARK_DAY).std()
 
-    # Relative position inside the past 1-day window.
-    # Value near 0 means close to the past-window minimum.
-    # Value near 1 means close to the past-window maximum.
-    rolling_min_96 = number.rolling(window=96, min_periods=96).min()
-    rolling_max_96 = number.rolling(window=96, min_periods=96).max()
-    range_96 = (rolling_max_96 - rolling_min_96).replace(0, np.nan)
-    df["feat_number_pos_96"] = (number - rolling_min_96) / range_96
+    rolling_min_48 = number.rolling(window=ROWS_PER_PARK_DAY, min_periods=ROWS_PER_PARK_DAY).min()
+    rolling_max_48 = number.rolling(window=ROWS_PER_PARK_DAY, min_periods=ROWS_PER_PARK_DAY).max()
+    range_48 = (rolling_max_48 - rolling_min_48).replace(0, np.nan)
+    df["feat_number_pos_48row"] = (number - rolling_min_48) / range_48
 
     return df
 
 
-def add_lagged_baidu_features(df: pd.DataFrame) -> pd.DataFrame:
+def drop_raw_baidu_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add a small first batch of lagged-Baidu-derived features.
+    Remove raw same-day Baidu columns from the training-facing featured output.
 
-    The same leakage rule still applies:
-    - all of these features are built from the already-lagged daily Baidu series
-    - therefore same-day Baidu is still unavailable
-    - rolling windows remain backward-only
+    Why this is necessary:
+    - keeping both raw same-day Baidu and lagged Baidu in the same featured CSV
+      creates a very easy leakage path
+    - a later training script might accidentally auto-select all numeric columns
+    - dropping the raw Baidu columns here makes misuse harder by construction
+
+    Important boundary:
+    - the raw aligned dataset is still preserved in `park_aligned_data.csv`
+    - only the derived training-facing dataset removes the unsafe columns
     """
-    baidu = df["baidu_PC+移动指数_lag1d"].astype(float)
-
-    # Keep the raw lagged explanatory variable as an explicit feature column.
-    df["feat_baidu_lag1d"] = baidu
-
-    # One-day change on the lagged Baidu series.
-    df["feat_baidu_diff_1d"] = baidu.diff(1)
-
-    # Short and medium moving averages on the lagged Baidu series.
-    # Because the value is daily but repeated to minute rows, these features are
-    # more about slow regime shifts than minute-level variation.
-    df["feat_baidu_ma_96"] = baidu.rolling(window=96, min_periods=96).mean()
-    df["feat_baidu_ma_288"] = baidu.rolling(window=288, min_periods=288).mean()
-    df["feat_baidu_ma_spread_96_288"] = df["feat_baidu_ma_96"] - df["feat_baidu_ma_288"]
-
-    return df
+    existing = [col for col in RAW_BAIDU_COLUMNS if col in df.columns]
+    return df.drop(columns=existing)
 
 
 def run_checks(df: pd.DataFrame) -> None:
     """
     Perform sanity checks on the engineered output.
 
-    The checks focus on two things:
-    1. the original park base rows must remain unchanged
-    2. the key leakage-sensitive Baidu lag must behave as intended
+    The checks focus on three things:
+    1. original park base rows remain unchanged
+    2. unsafe raw Baidu columns are absent
+    3. lagged Baidu daily features obey the no-same-day rule
     """
     base = load_base_data()
 
-    # Original row count and ordering must remain unchanged.
     assert len(df) == len(base)
     assert df["时间戳"].tolist() == base["时间戳"].tolist()
     assert df["number"].tolist() == base["number"].tolist()
+    assert df["number_flag"].tolist() == base["number_flag"].tolist()
+    assert df["交通状况"].tolist() == base["交通状况"].tolist()
+    assert df["环境描述"].tolist() == base["环境描述"].tolist()
     assert df["原始文件名"].tolist() == base["原始文件名"].tolist()
 
-    # Same-day Baidu must not be visible through the lagged feature.
-    daily = (
-        df[["日期", "baidu_PC+移动指数", "baidu_PC+移动指数_lag1d"]]
+    for col in RAW_BAIDU_COLUMNS:
+        assert col not in df.columns
+
+    daily_base = (
+        base[["日期", "baidu_PC+移动指数"]]
         .drop_duplicates(subset=["日期"])
         .sort_values("日期")
         .reset_index(drop=True)
     )
-    assert pd.isna(daily.loc[0, "baidu_PC+移动指数_lag1d"])
-    for idx in range(1, len(daily)):
-        assert daily.loc[idx, "baidu_PC+移动指数_lag1d"] == daily.loc[idx - 1, "baidu_PC+移动指数"]
+    daily_featured = (
+        df[["日期", "feat_baidu_lag1d"]]
+        .drop_duplicates(subset=["日期"])
+        .sort_values("日期")
+        .reset_index(drop=True)
+    )
+
+    assert len(daily_base) == len(daily_featured)
+    assert pd.isna(daily_featured.loc[0, "feat_baidu_lag1d"])
+    for idx in range(1, len(daily_featured)):
+        assert daily_featured.loc[idx, "feat_baidu_lag1d"] == daily_base.loc[idx - 1, "baidu_PC+移动指数"]
 
 
 def main() -> None:
@@ -225,20 +259,18 @@ def main() -> None:
 
     Processing order:
     1. load the immutable park-aligned base table
-    2. create a strictly lagged Baidu daily feature
-    3. create backward-only `number` features
-    4. create a small set of backward-only lagged-Baidu features
+    2. attach safe daily-level lagged Baidu features
+    3. create backward-only `number` features with explicit row-based semantics
+    4. remove unsafe raw same-day Baidu columns from the featured output
     5. run sanity checks
-    6. save a new CSV without overwriting the base table
+    6. save a new CSV without overwriting the base aligned table
     """
     df = load_base_data()
-    df = add_lagged_baidu_feature(df)
+    df = attach_baidu_features(df)
     df = add_number_features(df)
-    df = add_lagged_baidu_features(df)
+    df = drop_raw_baidu_columns(df)
     run_checks(df)
 
-    # Convert timestamp back to a stable string form before saving so downstream
-    # scripts see a consistent representation.
     df["时间戳"] = df["时间戳"].dt.strftime("%Y-%m-%d %H:%M:%S")
     df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
 

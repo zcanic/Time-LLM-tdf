@@ -85,6 +85,14 @@
 - Files used:
   `plan.md` modified
   `change.md` modified
+- Updated the feature-engineering pipeline to remove raw same-day Baidu columns from the training-facing CSV, align feature window semantics with the true 48-rows-per-day cadence, and add an independent feature validation script.
+- Purpose: address the identified leakage and interpretability risks before training.
+- Impact: `park_featured_data.csv` now exposes only lagged/safe Baidu features, uses clearer row-based feature semantics, and can be checked by a dedicated validator.
+- Files used:
+  `data_process_and_data_to_use/build_features.py` modified
+  `data_process_and_data_to_use/validate_features.py` added
+  `data_process_and_data_to_use/park_featured_data.csv` modified
+  `change.md` modified
 - Added a dedicated feature-engineering script for the park-aligned dataset with detailed inline comments explaining each processing step and the leakage boundary.
 - Purpose: create a reviewable, reproducible path to append backward-only engineered features and lagged-Baidu features into a new CSV.
 - Impact: introduces a separate feature-building entry point that preserves the base table and writes an enriched dataset file.
