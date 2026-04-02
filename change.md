@@ -131,6 +131,13 @@
   `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` added
   `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` added
   `change.md` modified
+- Expanded the XGBoost export script to include reviewed structured weather, holiday, weekday, and traffic features with controlled encoding.
+- Purpose: avoid wasting useful structured fields from `park_featured_data.csv` while still keeping the baseline feature set auditable.
+- Impact: `xgb_features.csv` now includes engineered `number` features, lagged Baidu, weather numeric fields, binary holiday flags, weekday sin/cos, small-category date-tag OHE, and ordinal traffic encoding.
+- Files used:
+  `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` modified
+  `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` modified
+  `change.md` modified
 - Deleted `数据处理问题.md` after confirming the current data-generation and validation chain status in subsequent reviews.
 - Purpose: remove an outdated standalone blocker summary and keep the repository documentation focused on current artifacts.
 - Impact: the dedicated issue summary document is no longer present in the repo; historical change trace remains in `change.md`.
