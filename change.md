@@ -138,6 +138,40 @@
   `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` modified
   `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` modified
   `change.md` modified
+- Added a minimal XGBoost baseline training entry under `baseline_xgb`.
+- Purpose: start a reproducible tree-model baseline on the curated `xgb_features.csv` before moving further into Time-LLM training.
+- Impact: the repo now has a chronological XGBoost training script that saves a model, metrics, and test predictions.
+- Files used:
+  `baseline_xgb/train_xgb.py` added
+  `change.md` modified
+- Updated the XGBoost baseline split to match Time-LLM's `70/10/20` convention and made the leading invalid-history row drop explicit in the training pipeline.
+- Purpose: keep the baseline comparison protocol aligned with the main training setup and avoid training on rows that do not yet have valid lagged/rolling features.
+- Impact: baseline metrics now come from the same chronological split style as Time-LLM, after excluding the early rows with incomplete feature history.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `change.md` modified
+- Added XGBoost baseline diagnostic figure outputs for residual inspection and boosting-round error tracking.
+- Purpose: make the baseline training result easier to inspect visually, especially for residual structure and convergence behavior.
+- Impact: each baseline training run now writes `residual_vs_target.png` and `training_curve.png` into `baseline_xgb`.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `baseline_xgb/residual_vs_target.png` added
+  `baseline_xgb/training_curve.png` added
+  `change.md` modified
+- Updated the XGBoost training-curve figure to plot explicit RMSE and MAE traces for both train and validation sets.
+- Purpose: make the convergence plot reflect the concrete metrics used for baseline judgment instead of a generic single-error curve.
+- Impact: `training_curve.png` now shows `train_rmse`, `val_rmse`, `train_mae`, and `val_mae` across boosting rounds.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `baseline_xgb/training_curve.png` modified
+  `change.md` modified
+- Refined the training-curve y-axis label from a generic error label to an explicit `RMSE / MAE`.
+- Purpose: make the plotted metric family immediately readable without relying only on the legend.
+- Impact: `training_curve.png` now has a clearer axis label for review.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `baseline_xgb/training_curve.png` modified
+  `change.md` modified
 - Deleted `数据处理问题.md` after confirming the current data-generation and validation chain status in subsequent reviews.
 - Purpose: remove an outdated standalone blocker summary and keep the repository documentation focused on current artifacts.
 - Impact: the dedicated issue summary document is no longer present in the repo; historical change trace remains in `change.md`.
