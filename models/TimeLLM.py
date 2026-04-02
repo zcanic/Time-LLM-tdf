@@ -35,68 +35,75 @@ class Model(nn.Module):
         self.pred_len = configs.pred_len
         self.seq_len = configs.seq_len
         self.d_ff = configs.d_ff
-        self.top_k = 5
+        self.top_k = configs.top_k
         self.d_llm = configs.llm_dim
         self.patch_len = configs.patch_len
         self.stride = configs.stride
+        self.prompt_max_length = configs.prompt_max_length
+        self.patch_embedding_dtype = getattr(configs, 'patch_embedding_dtype', 'auto')
+
+        model_name = str(configs.llm_model_path) if configs.llm_model_path else ''
+        if not model_name:
+            raise ValueError('llm_model_path must be provided before constructing TimeLLM.Model.')
+        tokenizer_name = str(configs.tokenizer_path) if configs.tokenizer_path else model_name
+        local_only = bool(getattr(configs, 'local_files_only', False))
 
         if configs.llm_model == 'LLAMA':
-            # self.llama_config = LlamaConfig.from_pretrained('/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/')
-            self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
+            self.llama_config = LlamaConfig.from_pretrained(model_name)
             self.llama_config.num_hidden_layers = configs.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
             try:
                 self.llm_model = LlamaModel.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
-                    'huggyllama/llama-7b',
+                    model_name,
                     trust_remote_code=True,
-                    local_files_only=True,
+                    local_files_only=local_only,
                     config=self.llama_config,
-                    # load_in_4bit=True
                 )
             except EnvironmentError:  # downloads model from HF is not already done
+                if local_only:
+                    raise
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = LlamaModel.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
-                    'huggyllama/llama-7b',
+                    model_name,
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.llama_config,
-                    # load_in_4bit=True
                 )
             try:
                 self.tokenizer = LlamaTokenizer.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
-                    'huggyllama/llama-7b',
+                    tokenizer_name,
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=local_only
                 )
             except EnvironmentError:  # downloads the tokenizer from HF if not already done
+                if local_only:
+                    raise
                 print("Local tokenizer files not found. Atempting to download them..")
                 self.tokenizer = LlamaTokenizer.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
-                    'huggyllama/llama-7b',
+                    tokenizer_name,
                     trust_remote_code=True,
                     local_files_only=False
                 )
         elif configs.llm_model == 'GPT2':
-            self.gpt2_config = GPT2Config.from_pretrained('openai-community/gpt2')
+            self.gpt2_config = GPT2Config.from_pretrained(model_name)
 
             self.gpt2_config.num_hidden_layers = configs.llm_layers
             self.gpt2_config.output_attentions = True
             self.gpt2_config.output_hidden_states = True
             try:
                 self.llm_model = GPT2Model.from_pretrained(
-                    'openai-community/gpt2',
+                    model_name,
                     trust_remote_code=True,
-                    local_files_only=True,
+                    local_files_only=local_only,
                     config=self.gpt2_config,
                 )
             except EnvironmentError:  # downloads model from HF is not already done
+                if local_only:
+                    raise
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = GPT2Model.from_pretrained(
-                    'openai-community/gpt2',
+                    model_name,
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.gpt2_config,
@@ -104,34 +111,38 @@ class Model(nn.Module):
 
             try:
                 self.tokenizer = GPT2Tokenizer.from_pretrained(
-                    'openai-community/gpt2',
+                    tokenizer_name,
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=local_only
                 )
             except EnvironmentError:  # downloads the tokenizer from HF if not already done
+                if local_only:
+                    raise
                 print("Local tokenizer files not found. Atempting to download them..")
                 self.tokenizer = GPT2Tokenizer.from_pretrained(
-                    'openai-community/gpt2',
+                    tokenizer_name,
                     trust_remote_code=True,
                     local_files_only=False
                 )
         elif configs.llm_model == 'BERT':
-            self.bert_config = BertConfig.from_pretrained('google-bert/bert-base-uncased')
+            self.bert_config = BertConfig.from_pretrained(model_name)
 
             self.bert_config.num_hidden_layers = configs.llm_layers
             self.bert_config.output_attentions = True
             self.bert_config.output_hidden_states = True
             try:
                 self.llm_model = BertModel.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    model_name,
                     trust_remote_code=True,
-                    local_files_only=True,
+                    local_files_only=local_only,
                     config=self.bert_config,
                 )
             except EnvironmentError:  # downloads model from HF is not already done
+                if local_only:
+                    raise
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = BertModel.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    model_name,
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.bert_config,
@@ -139,14 +150,16 @@ class Model(nn.Module):
 
             try:
                 self.tokenizer = BertTokenizer.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    tokenizer_name,
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=local_only
                 )
             except EnvironmentError:  # downloads the tokenizer from HF if not already done
+                if local_only:
+                    raise
                 print("Local tokenizer files not found. Atempting to download them..")
                 self.tokenizer = BertTokenizer.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    tokenizer_name,
                     trust_remote_code=True,
                     local_files_only=False
                 )
@@ -164,18 +177,20 @@ class Model(nn.Module):
             param.requires_grad = False
 
         if configs.prompt_domain:
-            self.description = configs.content
+            self.description = configs.content or configs.dataset_description
         else:
-            self.description = 'The Electricity Transformer Temperature (ETT) is a crucial indicator in the electric power long-term deployment.'
+            self.description = configs.dataset_description
 
         self.dropout = nn.Dropout(configs.dropout)
 
         self.patch_embedding = PatchEmbedding(
             configs.d_model, self.patch_len, self.stride, configs.dropout)
 
-        self.word_embeddings = self.llm_model.get_input_embeddings().weight
-        self.vocab_size = self.word_embeddings.shape[0]
-        self.num_tokens = 1000
+        embedding_layer = self.llm_model.get_input_embeddings()
+        assert isinstance(embedding_layer, nn.Embedding)
+        self.word_embeddings = embedding_layer.weight
+        self.vocab_size = int(self.word_embeddings.size(0))
+        self.num_tokens = configs.num_tokens
         self.mapping_layer = nn.Linear(self.vocab_size, self.num_tokens)
 
         self.reprogramming_layer = ReprogrammingLayer(configs.d_model, configs.n_heads, self.d_ff, self.d_llm)
@@ -224,20 +239,28 @@ class Model(nn.Module):
                 f"max value {max_values_str}, "
                 f"median value {median_values_str}, "
                 f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
-                f"top 5 lags are : {lags_values_str}<|<end_prompt>|>"
+                f"top {self.top_k} lags are : {lags_values_str}<|<end_prompt>|>"
             )
 
             prompt.append(prompt_)
 
         x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous()
 
-        prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048).input_ids
-        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device))  # (batch, prompt_token, dim)
+        prompt = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.prompt_max_length,
+        ).input_ids
+        embedding_layer = self.llm_model.get_input_embeddings()
+        assert isinstance(embedding_layer, nn.Embedding)
+        prompt_embeddings = embedding_layer(prompt.to(x_enc.device))  # (batch, prompt_token, dim)
 
-        source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
+        source_embeddings = torch.transpose(self.mapping_layer(torch.transpose(self.word_embeddings, 0, 1)), 0, 1)
 
         x_enc = x_enc.permute(0, 2, 1).contiguous()
-        enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+        enc_out, n_vars = self.patch_embedding(self._cast_patch_embedding_input(x_enc))
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
         dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
@@ -263,12 +286,23 @@ class Model(nn.Module):
         _, lags = torch.topk(mean_value, self.top_k, dim=-1)
         return lags
 
+    def _cast_patch_embedding_input(self, x_enc):
+        if self.patch_embedding_dtype == 'auto':
+            return x_enc
+        dtype_map = {
+            'float32': torch.float32,
+            'float16': torch.float16,
+            'bfloat16': torch.bfloat16,
+        }
+        return x_enc.to(dtype_map[self.patch_embedding_dtype])
+
 
 class ReprogrammingLayer(nn.Module):
     def __init__(self, d_model, n_heads, d_keys=None, d_llm=None, attention_dropout=0.1):
         super(ReprogrammingLayer, self).__init__()
 
-        d_keys = d_keys or (d_model // n_heads)
+        d_keys = int(d_keys or (d_model // n_heads))
+        d_llm = int(d_llm or d_model)
 
         self.query_projection = nn.Linear(d_model, d_keys * n_heads)
         self.key_projection = nn.Linear(d_llm, d_keys * n_heads)

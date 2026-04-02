@@ -214,3 +214,56 @@
   `baseline_xgb/train_xgb.py` modified
   `xgb问题.md` modified
   `change.md` modified
+- Reworked the main training entrypoints and shared utilities to make custom-data runs safer and less assumption-heavy.
+- Purpose: remove destructive global checkpoint cleanup, stop mandatory prompt-bank coupling, replace hidden runtime side effects with explicit CLI flags, and make path/runtime configuration usable outside the benchmark shell setup.
+- Impact: `run_main.py`, `run_pretrain.py`, and `run_m4.py` now use explicit custom-data CLI controls (prompt text/path, dataset description, split ratios, date column, dimension inference, deepspeed toggle, checkpoint cleanup toggle, prompt/runtime constants), resolve repo-relative paths safely, and only clean the current run directory when explicitly requested; `utils/tools.py` now centralizes accelerator creation, prompt loading, repo path resolution, dataset description defaults, and guarded cleanup behavior.
+- Files used:
+  `run_main.py` modified
+  `run_pretrain.py` modified
+  `run_m4.py` modified
+  `utils/tools.py` modified
+  `change.md` modified
+- Refactored the dataset factories and loaders to make custom datasets and evaluation behavior configurable instead of benchmark-hardcoded.
+- Purpose: allow unknown dataset names to fall back to `Dataset_Custom`, accept common datetime column aliases with helpful errors, expose split ratios and ETT month windows, and make channel-expansion behavior explicit.
+- Impact: `data_provider/data_factory.py` and `data_provider_pretrain/data_factory.py` now use deterministic validation/test loaders (`shuffle=False`, `drop_last=False`, eval batch size) and pass through custom-data controls; `data_provider/data_loader.py` and `data_provider_pretrain/data_loader.py` now support `channel_independence`, explicit custom split ratios, custom date columns, safer timestamp parsing, configurable ETT split windows, and clearer sample-shape semantics.
+- Files used:
+  `data_provider/data_factory.py` modified
+  `data_provider/data_loader.py` modified
+  `data_provider_pretrain/data_factory.py` modified
+  `data_provider_pretrain/data_loader.py` modified
+  `change.md` modified
+- Exposed previously hard-coded Time-LLM model/runtime assumptions and replaced the benchmark ETTh1 launch script with a safer parameterized example.
+- Purpose: make backbone source selection, prompt context, token budget, lag count, patch dtype, and script launch defaults configurable enough for custom-data bring-up.
+- Impact: `models/TimeLLM.py` now accepts overrideable model/tokenizer paths, local-files-only behavior, generic dataset descriptions, configurable `top_k` / `num_tokens` / prompt max length / patch embedding dtype, and no longer injects a fixed ETT description by default; `scripts/TimeLLM_ETTh1.sh` now uses environment-overridable single-process-friendly defaults instead of hard-wiring 8 processes, bf16, and fixed dimensions.
+- Files used:
+  `models/TimeLLM.py` modified
+  `scripts/TimeLLM_ETTh1.sh` modified
+  `change.md` modified
+- Closed the final custom-data safety gaps from the follow-up review by adding guarded checkpoint cleanup and richer custom split handling.
+- Purpose: turn the first repaired pass into a safer end-to-end custom-data training baseline instead of stopping at a conditional pass.
+- Impact: checkpoint cleanup now refuses to delete anything outside the configured checkpoints root (and will not delete the root itself), `Dataset_Custom` now supports univariate `date+target` datasets when `--features S`, custom datasets can use explicit `--train_end_date/--val_end_date` split boundaries, and both custom/ETT loaders now guard against negative split borders from too-short datasets or oversized sequence windows.
+- Files used:
+  `utils/tools.py` modified
+  `run_main.py` modified
+  `run_pretrain.py` modified
+  `run_m4.py` modified
+  `data_provider/data_factory.py` modified
+  `data_provider/data_loader.py` modified
+  `data_provider_pretrain/data_factory.py` modified
+  `data_provider_pretrain/data_loader.py` modified
+  `change.md` modified
+- Finished the remaining follow-up fixes needed to fully retire the training-pipeline problem checklist and then removed `problems.md`.
+- Purpose: eliminate the last benchmark-era assumptions that were still only partially addressed, so the repo’s custom-data training path no longer depends on hidden loader defaults, fixed month math, model identifiers inside the model class, or a fixed prompt-bank directory.
+- Impact: prompt bank lookup is now directory-configurable via `--prompt_bank_dir`; LLM default source selection is prepared before model construction instead of being hard-coded inside `TimeLLM.py`; ETT and pretrain ETT loaders now split by dataset-length ratios instead of `30*24` month math; loader construction now requires explicit sequence windows; `channel_independence` defaults to `0`; and Oracle re-check confirmed the `problems.md` issue list is resolved enough to remove the document.
+- Files used:
+  `utils/tools.py` modified
+  `run_main.py` modified
+  `run_pretrain.py` modified
+  `run_m4.py` modified
+  `data_provider/data_factory.py` modified
+  `data_provider/data_loader.py` modified
+  `data_provider_pretrain/data_factory.py` modified
+  `data_provider_pretrain/data_loader.py` modified
+  `models/TimeLLM.py` modified
+  `problems.md` deleted
+  `change.md` modified

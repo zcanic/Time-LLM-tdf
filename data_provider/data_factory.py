@@ -14,14 +14,19 @@ data_dict = {
 
 
 def data_provider(args, flag):
-    Data = data_dict[args.data]
+    Data = data_dict.get(args.data, Dataset_Custom)
     timeenc = 0 if args.embed != 'timeF' else 1
     percent = args.percent
 
     if flag == 'test':
         shuffle_flag = False
-        drop_last = True
-        batch_size = args.batch_size
+        drop_last = False
+        batch_size = args.eval_batch_size
+        freq = args.freq
+    elif flag == 'val':
+        shuffle_flag = False
+        drop_last = False
+        batch_size = args.eval_batch_size
         freq = args.freq
     else:
         shuffle_flag = True
@@ -53,7 +58,14 @@ def data_provider(args, flag):
             timeenc=timeenc,
             freq=freq,
             percent=percent,
-            seasonal_patterns=args.seasonal_patterns
+            seasonal_patterns=args.seasonal_patterns,
+            train_split_ratio=args.train_split_ratio,
+            val_split_ratio=args.val_split_ratio,
+            test_split_ratio=args.test_split_ratio,
+            train_end_date=getattr(args, 'train_end_date', ''),
+            val_end_date=getattr(args, 'val_end_date', ''),
+            custom_date_col=args.custom_date_col,
+            channel_independence=args.channel_independence,
         )
     data_loader = DataLoader(
         data_set,

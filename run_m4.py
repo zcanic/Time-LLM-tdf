@@ -1,7 +1,5 @@
 import argparse
 import torch
-from accelerate import Accelerator, DeepSpeedPlugin
-from accelerate import DistributedDataParallelKwargs
 from torch import optim
 from torch.optim import lr_scheduler
 
@@ -18,10 +16,18 @@ from utils.losses import smape_loss
 from utils.m4_summary import M4Summary
 import os
 
-os.environ['CURL_CA_BUNDLE'] = ''
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:64"
-
-from utils.tools import del_files, EarlyStopping, adjust_learning_rate, load_content, test
+from utils.tools import (
+    EarlyStopping,
+    adjust_learning_rate,
+    build_accelerator,
+    cleanup_experiment_path,
+    default_dataset_description,
+    infer_data_dims,
+    load_content,
+    resolve_repo_path,
+    default_llm_source,
+    test,
+)
 
 parser = argparse.ArgumentParser(description='Time-LLM')
 
@@ -42,7 +48,7 @@ parser.add_argument('--seed', type=int, default=0, help='random seed')
 
 # data loader
 parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
-parser.add_argument('--root_path', type=str, default='./dataset', help='root path of the data file')
+parser.add_argument('--root_path', type=str, default=str(resolve_repo_path('dataset')), help='root path of the data file')
 parser.add_argument('--data_path', type=str, default='ETTh1.csv', help='data file')
 parser.add_argument('--features', type=str, default='M',
                     help='forecasting task, options:[M, S, MS]; '
@@ -54,18 +60,25 @@ parser.add_argument('--freq', type=str, default='h',
                     help='freq for time features encoding, '
                          'options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], '
                          'you can also use more detailed freq like 15min or 3h')
-parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
+parser.add_argument('--checkpoints', type=str, default=str(resolve_repo_path('checkpoints')), help='location of model checkpoints')
+parser.add_argument('--train_split_ratio', type=float, default=0.7, help='train split ratio for custom datasets')
+parser.add_argument('--val_split_ratio', type=float, default=0.1, help='validation split ratio for custom datasets')
+parser.add_argument('--test_split_ratio', type=float, default=0.2, help='test split ratio for custom datasets')
+parser.add_argument('--train_end_date', type=str, default='', help='optional inclusive train end date for custom datasets')
+parser.add_argument('--val_end_date', type=str, default='', help='optional inclusive validation end date for custom datasets')
+parser.add_argument('--custom_date_col', type=str, default='', help='optional timestamp column name for custom datasets')
+parser.add_argument('--channel_independence', type=int, default=0, help='1: one channel per sample, 0: keep all channels together')
 
 # forecasting task
-parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
-parser.add_argument('--label_len', type=int, default=48, help='start token length')
-parser.add_argument('--pred_len', type=int, default=96, help='prediction sequence length')
+parser.add_argument('--seq_len', type=int, default=-1, help='input sequence length; set explicitly for reproducible runs')
+parser.add_argument('--label_len', type=int, default=-1, help='start token length; set explicitly for reproducible runs')
+parser.add_argument('--pred_len', type=int, default=-1, help='prediction sequence length; set explicitly for reproducible runs')
 parser.add_argument('--seasonal_patterns', type=str, default='Monthly', help='subset for M4')
 
 # model define
-parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
-parser.add_argument('--dec_in', type=int, default=7, help='decoder input size')
-parser.add_argument('--c_out', type=int, default=7, help='output size')
+parser.add_argument('--enc_in', type=int, default=-1, help='encoder input size; <=0 infers from dataset')
+parser.add_argument('--dec_in', type=int, default=-1, help='decoder input size; <=0 infers from dataset')
+parser.add_argument('--c_out', type=int, default=-1, help='output size; <=0 infers from dataset')
 parser.add_argument('--d_model', type=int, default=16, help='dimension of model')
 parser.add_argument('--n_heads', type=int, default=8, help='num of heads')
 parser.add_argument('--e_layers', type=int, default=2, help='num of encoder layers')
@@ -82,7 +95,19 @@ parser.add_argument('--patch_len', type=int, default=16, help='patch length')
 parser.add_argument('--stride', type=int, default=8, help='stride')
 parser.add_argument('--prompt_domain', type=int, default=0, help='')
 parser.add_argument('--llm_model', type=str, default='LLAMA', help='LLM model') # LLAMA, GPT2, BERT
-parser.add_argument('--llm_dim', type=int, default='4096', help='LLM model dimension')# LLama7b:4096; GPT2-small:768; BERT-base:768
+parser.add_argument('--llm_dim', type=int, default=4096, help='LLM model dimension')# LLama7b:4096; GPT2-small:768; BERT-base:768
+parser.add_argument('--llm_model_path', type=str, default='', help='optional HuggingFace model path or local directory override')
+parser.add_argument('--tokenizer_path', type=str, default='', help='optional tokenizer path override')
+parser.add_argument('--local_files_only', type=int, default=0, help='force local model/tokenizer loading only')
+parser.add_argument('--dataset_description', type=str, default='', help='dataset description used when prompt files are not provided')
+parser.add_argument('--prompt_text', type=str, default='', help='inline prompt text override')
+parser.add_argument('--prompt_path', type=str, default='', help='optional prompt file path')
+parser.add_argument('--prompt_bank_name', type=str, default='', help='optional prompt bank file stem to load')
+parser.add_argument('--prompt_bank_dir', type=str, default='', help='optional directory containing prompt bank files')
+parser.add_argument('--top_k', type=int, default=5, help='number of lag candidates injected into the prompt')
+parser.add_argument('--num_tokens', type=int, default=1000, help='projected vocabulary token count used by the reprogramming layer')
+parser.add_argument('--prompt_max_length', type=int, default=2048, help='maximum tokenizer prompt length')
+parser.add_argument('--patch_embedding_dtype', type=str, default='auto', choices=['auto', 'float32', 'float16', 'bfloat16'], help='dtype used before patch embedding')
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
@@ -100,11 +125,23 @@ parser.add_argument('--pct_start', type=float, default=0.2, help='pct_start')
 parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 parser.add_argument('--llm_layers', type=int, default=6)
 parser.add_argument('--percent', type=int, default=100)
+parser.add_argument('--infer_dims', type=int, default=1, help='infer enc_in/dec_in/c_out from the dataset')
+parser.add_argument('--use_deepspeed', type=int, default=0, help='enable DeepSpeed-backed Accelerator setup')
+parser.add_argument('--deepspeed_config', type=str, default='ds_config_zero2.json', help='DeepSpeed config path when enabled')
+parser.add_argument('--find_unused_parameters', type=int, default=1, help='DDP find_unused_parameters flag')
+parser.add_argument('--cleanup_checkpoints', type=int, default=0, help='delete only this run checkpoint directory after finishing')
 
 args = parser.parse_args()
-ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-deepspeed_plugin = DeepSpeedPlugin(hf_ds_config='./ds_config_zero2.json')
-accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
+args.root_path = str(resolve_repo_path(args.root_path))
+args.checkpoints = str(resolve_repo_path(args.checkpoints))
+if not args.llm_model_path:
+    args.llm_model_path = default_llm_source(args.llm_model)
+if not args.tokenizer_path:
+    args.tokenizer_path = args.llm_model_path
+if args.data != 'm4' and min(args.seq_len, args.label_len, args.pred_len) <= 0:
+    raise ValueError('Set --seq_len, --label_len, and --pred_len explicitly.')
+accelerator = build_accelerator(args)
+path = ''
 
 for ii in range(args.itr):
     # setting record of experiments
@@ -136,6 +173,11 @@ for ii in range(args.itr):
     vali_data, vali_loader = data_provider(args, 'val')
     test_data, test_loader = data_provider(args, 'test')
 
+    infer_data_dims(args, train_data)
+    args.content = load_content(args)
+    if not args.dataset_description:
+        args.dataset_description = default_dataset_description(args)
+
     if args.model == 'Autoformer':
         model = Autoformer.Model(args).float()
     elif args.model == 'DLinear':
@@ -145,7 +187,6 @@ for ii in range(args.itr):
 
     path = os.path.join(args.checkpoints,
                         setting + '-' + args.model_comment)  # unique checkpoint saving path
-    args.content = load_content(args)
     if not os.path.exists(path) and accelerator.is_local_main_process:
         os.makedirs(path)
 
@@ -243,7 +284,13 @@ for ii in range(args.itr):
     unwrapped_model.load_state_dict(torch.load(best_model_path, map_location=lambda storage, loc: storage))
 
     x, _ = train_loader.dataset.last_insample_window()
-    y = test_loader.dataset.timeseries
+    test_dataset = test_loader.dataset
+    if not hasattr(test_dataset, 'timeseries') or not hasattr(test_dataset, 'ids'):
+        raise TypeError('M4 evaluation requires a dataset exposing both ids and timeseries attributes.')
+
+    test_timeseries = np.asarray(getattr(test_dataset, 'timeseries'), dtype=object)
+    test_ids = np.asarray(getattr(test_dataset, 'ids'))
+    y = test_timeseries
     x = torch.tensor(x, dtype=torch.float32).to(accelerator.device)
     x = x.unsqueeze(-1)
 
@@ -274,15 +321,15 @@ for ii in range(args.itr):
 
     accelerator.print('test shape:', preds.shape)
 
-    folder_path = './m4_results/' + args.model + '-' + args.model_comment + '/'
+    folder_path = str(resolve_repo_path('m4_results') / (args.model + '-' + args.model_comment)) + '/'
     if not os.path.exists(folder_path) and accelerator.is_local_main_process:
         os.makedirs(folder_path)
 
     if accelerator.is_local_main_process:
-        forecasts_df = pandas.DataFrame(preds[:, :, 0], columns=[f'V{i + 1}' for i in range(args.pred_len)])
-        forecasts_df.index = test_loader.dataset.ids[:preds.shape[0]]
+        forecast_columns = pandas.Index([f'V{i + 1}' for i in range(args.pred_len)])
+        forecasts_df = pandas.DataFrame(preds[:, :, 0], columns=forecast_columns)
+        forecasts_df.index = test_ids[:preds.shape[0]]
         forecasts_df.index.name = 'id'
-        forecasts_df.set_index(forecasts_df.columns[0], inplace=True)
         forecasts_df.to_csv(folder_path + args.seasonal_patterns + '_forecast.csv')
 
         # calculate metrics
@@ -306,6 +353,6 @@ for ii in range(args.itr):
 
 accelerator.wait_for_everyone()
 if accelerator.is_local_main_process:
-    path = './checkpoints'  # unique checkpoint saving path
-    del_files(path)  # delete checkpoint files
-    accelerator.print('success delete checkpoints')
+    cleaned = cleanup_experiment_path(path, bool(args.cleanup_checkpoints), args.checkpoints)
+    if cleaned:
+        accelerator.print(f'success delete checkpoints: {path}')

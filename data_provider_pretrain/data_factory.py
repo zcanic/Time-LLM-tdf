@@ -1,6 +1,7 @@
 from torch.utils.data import DataLoader
 
 from data_provider_pretrain.data_loader import Dataset_ETT_hour, Dataset_ETT_minute
+from data_provider.data_loader import Dataset_Custom
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
@@ -11,14 +12,19 @@ data_dict = {
 
 
 def data_provider(args, data, data_path, pretrain=True, flag='train'):
-    Data = data_dict[data]
+    Data = data_dict.get(data, Dataset_Custom)
     timeenc = 0 if args.embed != 'timeF' else 1
     percent = args.percent
 
     if flag == 'test':
         shuffle_flag = False
-        drop_last = True
-        batch_size = args.batch_size
+        drop_last = False
+        batch_size = args.eval_batch_size
+        freq = args.freq
+    elif flag == 'val':
+        shuffle_flag = False
+        drop_last = False
+        batch_size = args.eval_batch_size
         freq = args.freq
     else:
         shuffle_flag = True
@@ -26,7 +32,7 @@ def data_provider(args, data, data_path, pretrain=True, flag='train'):
         batch_size = args.batch_size
         freq = args.freq
 
-    data_set = Data(
+    common_kwargs = dict(
         root_path=args.root_path,
         data_path=data_path,
         flag=flag,
@@ -37,8 +43,20 @@ def data_provider(args, data, data_path, pretrain=True, flag='train'):
         freq=freq,
         percent=percent,
         seasonal_patterns=args.seasonal_patterns,
-        pretrain=pretrain
+        train_split_ratio=args.train_split_ratio,
+        val_split_ratio=args.val_split_ratio,
+        test_split_ratio=args.test_split_ratio,
+        train_end_date=getattr(args, 'train_end_date', ''),
+        val_end_date=getattr(args, 'val_end_date', ''),
+        custom_date_col=args.custom_date_col,
+        channel_independence=args.channel_independence,
+        pretrain_train_split_ratio=getattr(args, 'pretrain_train_split_ratio', 0.8),
+        pretrain_eval_split_ratio=getattr(args, 'pretrain_eval_split_ratio', 0.2),
     )
+    if Data in data_dict.values():
+        data_set = Data(pretrain=pretrain, **common_kwargs)
+    else:
+        data_set = Data(**common_kwargs)
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,

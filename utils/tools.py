@@ -2,13 +2,20 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import shutil
+from pathlib import Path
+
+from accelerate import Accelerator, DeepSpeedPlugin, DistributedDataParallelKwargs
 
 from tqdm import tqdm
 
 plt.switch_backend('agg')
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def adjust_learning_rate(accelerator, optimizer, scheduler, epoch, args, printout=True):
+    lr_adjust = {}
     if args.lradj == 'type1':
         lr_adjust = {epoch: args.learning_rate * (0.5 ** ((epoch - 1) // 1))}
     elif args.lradj == 'type2':
@@ -43,7 +50,7 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
+        self.val_loss_min = np.inf
         self.delta = delta
         self.save_mode = save_mode
 
@@ -132,6 +139,120 @@ def cal_accuracy(y_pred, y_true):
 
 def del_files(dir_path):
     shutil.rmtree(dir_path)
+
+
+def resolve_repo_path(path_value):
+    if path_value is None:
+        return None
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return (PROJECT_ROOT / path).resolve()
+
+
+def build_accelerator(args):
+    ddp_kwargs = DistributedDataParallelKwargs(
+        find_unused_parameters=bool(getattr(args, 'find_unused_parameters', True))
+    )
+    use_deepspeed = bool(getattr(args, 'use_deepspeed', False))
+    deepspeed_config = getattr(args, 'deepspeed_config', '')
+    deepspeed_plugin = None
+    if use_deepspeed:
+        config_path = resolve_repo_path(deepspeed_config)
+        if config_path is None or not config_path.exists():
+            raise FileNotFoundError(
+                f"DeepSpeed config not found: {deepspeed_config}. "
+                "Set --use_deepspeed 0 for a local smoke test or pass a valid --deepspeed_config path."
+            )
+        deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=str(config_path))
+    return Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
+
+
+def cleanup_experiment_path(path_value, enabled=False, allowed_root=None):
+    if not enabled:
+        return False
+    path = resolve_repo_path(path_value)
+    if path is None or not path.exists():
+        return False
+    if allowed_root is not None:
+        root_path = resolve_repo_path(allowed_root)
+        if root_path is None:
+            raise ValueError('Cleanup root path is invalid.')
+        if path == root_path or root_path not in path.parents:
+            raise ValueError(
+                f'Refusing to delete {path} because it is not a child run directory under {root_path}.'
+            )
+    shutil.rmtree(path)
+    return True
+
+
+def load_content(args):
+    if not bool(getattr(args, 'prompt_domain', False)):
+        return ''
+
+    prompt_text = getattr(args, 'prompt_text', '')
+    if prompt_text:
+        return prompt_text
+
+    prompt_path = getattr(args, 'prompt_path', '')
+    if prompt_path:
+        resolved_prompt_path = resolve_repo_path(prompt_path)
+        if resolved_prompt_path is None or not resolved_prompt_path.exists():
+            raise FileNotFoundError(f'Prompt file not found: {prompt_path}')
+        return resolved_prompt_path.read_text(encoding='utf-8')
+
+    prompt_bank_name = getattr(args, 'prompt_bank_name', '')
+    if prompt_bank_name:
+        file = 'ETT' if 'ETT' in prompt_bank_name else prompt_bank_name
+        prompt_bank_dir = getattr(args, 'prompt_bank_dir', '') or str(PROJECT_ROOT / 'dataset' / 'prompt_bank')
+        resolved_prompt_bank_dir = resolve_repo_path(prompt_bank_dir)
+        if resolved_prompt_bank_dir is None:
+            raise FileNotFoundError(f'Prompt bank directory could not be resolved: {prompt_bank_dir}')
+        prompt_file = resolved_prompt_bank_dir / f'{file}.txt'
+        if not prompt_file.exists():
+            raise FileNotFoundError(
+                f'Prompt bank file not found: {prompt_file}. '
+                'Pass --prompt_path, --prompt_text, or --prompt_bank_dir instead.'
+            )
+        return prompt_file.read_text(encoding='utf-8')
+
+    return ''
+
+
+def infer_data_dims(args, dataset):
+    dataset_dim = getattr(dataset, 'enc_in', None)
+    if dataset_dim is None:
+        return
+
+    if bool(getattr(args, 'infer_dims', True)) or args.enc_in <= 0:
+        args.enc_in = int(dataset_dim)
+    if bool(getattr(args, 'infer_dims', True)) or args.dec_in <= 0:
+        args.dec_in = int(dataset_dim)
+    if bool(getattr(args, 'infer_dims', True)) or args.c_out <= 0:
+        args.c_out = int(dataset_dim)
+
+
+def default_dataset_description(args):
+    dataset_name = getattr(args, 'data', 'dataset')
+    target_name = getattr(args, 'target', 'target variable')
+    freq = getattr(args, 'freq', 'unknown frequency')
+    return (
+        f'This dataset is a custom time series dataset named {dataset_name}. '
+        f'The forecasting target is {target_name}. '
+        f'The sampling frequency is {freq}. '
+        'Use only the provided history and metadata instead of assuming an ETT electricity domain.'
+    )
+
+
+def default_llm_source(llm_model):
+    model_id_map = {
+        'LLAMA': 'huggyllama/llama-7b',
+        'GPT2': 'openai-community/gpt2',
+        'BERT': 'google-bert/bert-base-uncased',
+    }
+    if llm_model not in model_id_map:
+        raise ValueError(f'Unsupported llm_model: {llm_model}')
+    return model_id_map[llm_model]
 
 
 def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric):
@@ -223,11 +344,3 @@ def test(args, accelerator, model, train_loader, vali_loader, criterion):
     return loss
 
 
-def load_content(args):
-    if 'ETT' in args.data:
-        file = 'ETT'
-    else:
-        file = args.data
-    with open('./dataset/prompt_bank/{0}.txt'.format(file), 'r') as f:
-        content = f.read()
-    return content
