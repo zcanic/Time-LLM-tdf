@@ -178,3 +178,21 @@
 - Files used:
   `数据处理问题.md` deleted
   `change.md` modified
+- Added `xgb问题.md` to document forecasting-code correctness gaps found in `baseline_xgb/train_xgb.py`.
+- Purpose: record the current blocking/non-blocking issues for the XGBoost baseline under future-horizon forecasting semantics.
+- Impact: the repo now has a dedicated checklist describing target-horizon alignment and leakage risks before treating the baseline as a forecasting reference.
+- Files used:
+  `xgb问题.md` added
+  `change.md` modified
+- Repaired the XGBoost baseline to follow forecasting semantics from `xgb问题.md` by shifting the target to a future horizon and excluding same-day daily weather aggregates from the first safe baseline.
+- Purpose: convert the baseline from same-row regression into an explicit future `number` prediction setup and tighten feature availability against ambiguous same-day weather leakage.
+- Impact: `baseline_xgb/train_xgb.py` now trains on `t -> t+1 row` targets, drops rows without valid future labels, regenerates metrics/predictions/figures under forecasting semantics, and records the horizon plus feature list in the metrics output.
+- Files used:
+  `xgb问题.md` reviewed
+  `baseline_xgb/train_xgb.py` modified
+  `baseline_xgb/metrics.json` modified
+  `baseline_xgb/predictions.csv` modified
+  `baseline_xgb/residual_vs_target.png` modified
+  `baseline_xgb/training_curve.png` modified
+  `baseline_xgb/xgb_model.json` modified
+  `change.md` modified

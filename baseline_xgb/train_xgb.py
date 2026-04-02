@@ -18,9 +18,23 @@ RESIDUAL_FIG = OUTPUT_DIR / "residual_vs_target.png"
 TRAIN_CURVE_FIG = OUTPUT_DIR / "training_curve.png"
 
 
-# Target and feature columns are kept explicit so the training set does not
-# accidentally expand when the source CSV gains extra columns later.
-TARGET_COL = "number"
+# This baseline now uses an explicit future horizon instead of fitting the
+# current-row `number` value. A sample at row t predicts the target at row t+H.
+#
+# Defaulting to 1 row keeps the change minimal while restoring valid
+# forecasting semantics. The horizon is still a plain constant here so review
+# stays simple and the generated artifacts remain deterministic.
+HORIZON_ROWS = 1
+BASE_TARGET_COL = "number"
+TARGET_COL = f"target_number_t_plus_{HORIZON_ROWS}row"
+
+# Feature columns are kept explicit so the training set does not accidentally
+# expand when the source CSV gains extra columns later.
+#
+# Weather daily aggregates are intentionally excluded from this first repaired
+# forecasting baseline. Their business-time availability is ambiguous for
+# minute-level future prediction because a same-day daily min/max/avg/precip
+# value can summarize information from later in the day.
 FEATURE_COLS = [
     "feat_number_diff_1row",
     "feat_number_pct_change_1row",
@@ -37,11 +51,6 @@ FEATURE_COLS = [
     "feat_number_vol_48row",
     "feat_number_pos_48row",
     "feat_baidu_lag1d",
-    "weather_code",
-    "weather_temp_min",
-    "weather_temp_max",
-    "weather_temp_avg",
-    "weather_precip_total",
     "is_weekend",
     "is_holiday",
     "is_makeup_workday",
@@ -62,14 +71,28 @@ def load_data() -> pd.DataFrame:
     return df
 
 
+def add_forecast_target(df: pd.DataFrame) -> pd.DataFrame:
+    # Forecast label construction:
+    # - features are read from row t
+    # - target is the future visitor count at row t + HORIZON_ROWS
+    #
+    # The trailing rows cannot form labels once the future point falls outside
+    # the table, so they will be removed later in prepare_training_frame.
+    out = df.copy()
+    out[TARGET_COL] = out[BASE_TARGET_COL].shift(-HORIZON_ROWS)
+    return out
+
+
 def prepare_training_frame(df: pd.DataFrame) -> pd.DataFrame:
     # Drop rows that cannot form a valid feature vector because lagged Baidu and
     # backward-looking rolling features naturally produce NaN at the beginning
-    # of the series.
+    # of the series. Also drop the trailing rows that cannot form a valid
+    # future label once the target is shifted forward by HORIZON_ROWS.
     #
     # This is intentional. The leading rows do not have enough history yet, so
-    # they are not valid training samples for the baseline.
-    cols_needed = ["时间戳", "日期", TARGET_COL] + FEATURE_COLS
+    # they are not valid training samples for the baseline. The trailing rows
+    # do not have enough future horizon yet, so they are also invalid.
+    cols_needed = ["时间戳", "日期", BASE_TARGET_COL, TARGET_COL] + FEATURE_COLS
     missing = [col for col in cols_needed if col not in df.columns]
     if missing:
         raise ValueError(f"Missing required training columns: {missing}")
@@ -118,9 +141,9 @@ def save_residual_plot(y_true: np.ndarray, y_pred: np.ndarray) -> None:
     plt.figure(figsize=(8, 5))
     plt.scatter(y_true, residuals, s=10, alpha=0.35)
     plt.axhline(0.0, color="red", linestyle="--", linewidth=1.2)
-    plt.xlabel("True number")
+    plt.xlabel(f"True future number (t+{HORIZON_ROWS})")
     plt.ylabel("Residual (prediction - true)")
-    plt.title("XGBoost Residual vs True Target")
+    plt.title(f"XGBoost Residual vs Future Target (H={HORIZON_ROWS})")
     plt.tight_layout()
     plt.savefig(RESIDUAL_FIG, dpi=180)
     plt.close()
@@ -158,7 +181,8 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     raw_df = load_data()
-    df = prepare_training_frame(raw_df)
+    labeled_df = add_forecast_target(raw_df)
+    df = prepare_training_frame(labeled_df)
     train_df, val_df, test_df = chronological_split(df)
 
     model = build_model()
@@ -176,15 +200,18 @@ def main() -> None:
     test_pred = model.predict(test_df[FEATURE_COLS])
 
     metrics = {
+        "horizon_rows": int(HORIZON_ROWS),
         "train_rows": int(len(train_df)),
         "val_rows": int(len(val_df)),
         "test_rows": int(len(test_df)),
         "feature_count": int(len(FEATURE_COLS)),
+        "feature_columns": FEATURE_COLS,
         "val": evaluate(val_df[TARGET_COL].to_numpy(), val_pred),
         "test": evaluate(test_df[TARGET_COL].to_numpy(), test_pred),
     }
 
-    preds = test_df[["时间戳", "日期", TARGET_COL]].copy()
+    preds = test_df[["时间戳", "日期", BASE_TARGET_COL, TARGET_COL]].copy()
+    preds = preds.rename(columns={BASE_TARGET_COL: "number_at_t"})
     preds["prediction"] = test_pred
 
     save_residual_plot(test_df[TARGET_COL].to_numpy(), test_pred)

@@ -1,14 +1,42 @@
 {
-  "train_rows": 37808,
+  "horizon_rows": 1,
+  "train_rows": 37807,
   "val_rows": 5401,
   "test_rows": 10803,
-  "feature_count": 30,
+  "feature_count": 25,
+  "feature_columns": [
+    "feat_number_diff_1row",
+    "feat_number_pct_change_1row",
+    "feat_number_momentum_4row",
+    "feat_number_momentum_16row",
+    "feat_number_momentum_48row",
+    "feat_number_ma_4row",
+    "feat_number_ma_16row",
+    "feat_number_ma_48row",
+    "feat_number_ma_spread_16_48row",
+    "feat_number_slope_16row",
+    "feat_number_slope_48row",
+    "feat_number_vol_16row",
+    "feat_number_vol_48row",
+    "feat_number_pos_48row",
+    "feat_baidu_lag1d",
+    "is_weekend",
+    "is_holiday",
+    "is_makeup_workday",
+    "weekday_sin",
+    "weekday_cos",
+    "date_tag_周末",
+    "date_tag_工作日",
+    "date_tag_节假日",
+    "date_tag_调休上班",
+    "traffic_level"
+  ],
   "val": {
-    "rmse": 0.22605328706870012,
-    "mae": 0.06970985872034031
+    "rmse": 0.3061247939919925,
+    "mae": 0.11042693423879432
   },
   "test": {
-    "rmse": 0.5677887133205519,
-    "mae": 0.11006107472396373
+    "rmse": 0.6384417503035577,
+    "mae": 0.1704394864993113
   }
 }
