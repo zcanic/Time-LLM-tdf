@@ -204,6 +204,71 @@ Recommended first XGBoost inputs:
 - safe lagged Baidu features
 - optionally a small set of structured calendar fields
 
+### XGBoost feature list
+
+Use an explicit whitelist. Do not rely on automatic numeric-column selection.
+
+#### Core features
+
+These should be the first batch for the baseline:
+- `feat_number_diff_1row`
+- `feat_number_pct_change_1row`
+- `feat_number_momentum_4row`
+- `feat_number_momentum_16row`
+- `feat_number_momentum_48row`
+- `feat_number_ma_4row`
+- `feat_number_ma_16row`
+- `feat_number_ma_48row`
+- `feat_number_ma_spread_16_48row`
+- `feat_number_slope_16row`
+- `feat_number_slope_48row`
+- `feat_number_vol_16row`
+- `feat_number_vol_48row`
+- `feat_number_pos_48row`
+- `feat_baidu_lag1d`
+
+Why these are core:
+- they cover short-term change
+- they cover intraday and day-level trend
+- they cover local volatility
+- they cover current position relative to recent history
+- they include the main lagged external explanatory variable
+
+#### Optional features
+
+These are useful for ablation after the core baseline is stable:
+- `feat_number_ma_96row`
+- `feat_number_ma_ratio_16_48row`
+- `feat_baidu_diff_1d`
+- `feat_baidu_ma_3d`
+- `feat_baidu_ma_7d`
+- `feat_baidu_ma_spread_3d_7d`
+- structured calendar indicators derived from:
+  - `holiday_是否周末`
+  - `holiday_是否节假日放假`
+  - `holiday_是否调休上班`
+  - `holiday_日期标签`
+
+Why these are optional:
+- they may help, but they are not required to test the baseline hypothesis
+- some are more redundant with the core features
+- some require an extra encoding step for tree-model use
+
+#### Not recommended at baseline start
+
+Do not include these in the first XGBoost run:
+- raw weather text fields
+- raw traffic text fields
+- `环境描述`
+- any prompt-only text field
+- any raw same-day `baidu_*` column
+- uncontrolled one-hot expansion of many sparse text columns
+
+Why they are excluded:
+- they complicate the baseline without answering the core question first
+- they increase the chance of data leakage or brittle preprocessing
+- they are better reserved for later prompt-oriented Time-LLM experiments
+
 Avoid in the first XGBoost baseline:
 - raw text fields
 - any same-day raw Baidu columns

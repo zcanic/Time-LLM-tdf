@@ -118,6 +118,19 @@
 - Files used:
   `plan.md` modified
   `change.md` modified
+- Added an explicit XGBoost feature whitelist to `plan.md`, grouped into core, optional, and excluded baseline inputs.
+- Purpose: make the baseline setup concrete and prevent accidental use of unsafe or low-signal columns.
+- Impact: the plan now specifies which engineered `number` features and lagged Baidu features should enter the first tree-model experiments.
+- Files used:
+  `plan.md` modified
+  `change.md` modified
+- Added a dedicated XGBoost feature export script and output folder under `data_process_and_data_to_use/xgb_特征集`.
+- Purpose: materialize the first baseline feature whitelist into a clean CSV for tree-model training.
+- Impact: the repo now contains a baseline-ready `xgb_features.csv` generated from the reviewed core feature set.
+- Files used:
+  `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` added
+  `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` added
+  `change.md` modified
 - Deleted `数据处理问题.md` after confirming the current data-generation and validation chain status in subsequent reviews.
 - Purpose: remove an outdated standalone blocker summary and keep the repository documentation focused on current artifacts.
 - Impact: the dedicated issue summary document is no longer present in the repo; historical change trace remains in `change.md`.
