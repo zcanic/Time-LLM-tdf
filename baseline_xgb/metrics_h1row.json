@@ -1,0 +1,51 @@
+{
+  "horizon_rows": 1,
+  "target_col": "target_number_t_plus_1row",
+  "train_rows": 37807,
+  "val_rows": 5401,
+  "test_rows": 10803,
+  "feature_count": 25,
+  "feature_columns": [
+    "feat_number_diff_1row",
+    "feat_number_pct_change_1row",
+    "feat_number_momentum_4row",
+    "feat_number_momentum_16row",
+    "feat_number_momentum_48row",
+    "feat_number_ma_4row",
+    "feat_number_ma_16row",
+    "feat_number_ma_48row",
+    "feat_number_ma_spread_16_48row",
+    "feat_number_slope_16row",
+    "feat_number_slope_48row",
+    "feat_number_vol_16row",
+    "feat_number_vol_48row",
+    "feat_number_pos_48row",
+    "feat_baidu_lag1d",
+    "is_weekend",
+    "is_holiday",
+    "is_makeup_workday",
+    "weekday_sin",
+    "weekday_cos",
+    "date_tag_周末",
+    "date_tag_工作日",
+    "date_tag_节假日",
+    "date_tag_调休上班",
+    "traffic_level"
+  ],
+  "split_scheme": "chronological_70_10_20",
+  "drop_stats": {
+    "raw_rows": 54720,
+    "leading_rows_dropped_for_history": 48,
+    "trailing_rows_dropped_for_horizon": 1,
+    "rows_dropped_for_feature_nan": 708,
+    "usable_rows": 54011
+  },
+  "val": {
+    "rmse": 0.3061247939919925,
+    "mae": 0.11042693423879432
+  },
+  "test": {
+    "rmse": 0.6384417503035577,
+    "mae": 0.1704394864993113
+  }
+}

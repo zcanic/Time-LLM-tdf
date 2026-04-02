@@ -196,3 +196,21 @@
   `baseline_xgb/training_curve.png` modified
   `baseline_xgb/xgb_model.json` modified
   `change.md` modified
+- Improved the repaired XGBoost forecasting baseline so the forecast horizon is now a command-line parameter and each run writes horizon-specific artifact names instead of overwriting one shared output set.
+- Purpose: make the baseline ready for reviewed multi-horizon experiments such as `H=1/4/16` without mixing models, metrics, predictions, or figures across runs.
+- Impact: `baseline_xgb/train_xgb.py` now accepts `--horizon-rows`, writes files like `metrics_h1row.json`, records explicit drop statistics and target-column naming, and keeps the forecasting audit trail clearer.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `baseline_xgb/metrics_h1row.json` added
+  `baseline_xgb/predictions_h1row.csv` added
+  `baseline_xgb/residual_vs_target_h1row.png` added
+  `baseline_xgb/training_curve_h1row.png` added
+  `baseline_xgb/xgb_model_h1row.json` added
+  `change.md` modified
+- Finalized the forecasting-baseline repair by cleaning remaining type-safety hotspots in sample filtering/output rename and updating the XGBoost issue log to reflect that blocking items are resolved.
+- Purpose: close the remaining correctness gap so the repaired baseline is both forecasting-semantic and cleaner under static checks/document review.
+- Impact: `baseline_xgb/train_xgb.py` now uses an explicit valid-row mask workflow for training-frame construction, reports separate drop statistics for horizon-tail and feature-NaN filtering, and writes predictions with a stable timestamp formatting path under clean static diagnostics; `xgb问题.md` now records resolved status instead of open blockers.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `xgb问题.md` modified
+  `change.md` modified
