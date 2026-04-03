@@ -131,6 +131,17 @@ parser.add_argument('--find_unused_parameters', type=int, default=1, help='DDP f
 parser.add_argument('--cleanup_checkpoints', type=int, default=0, help='delete only this run checkpoint directory after finishing')
 
 args = parser.parse_args()
+seed = int(args.seed)
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+if hasattr(torch, 'use_deterministic_algorithms'):
+    torch.use_deterministic_algorithms(True, warn_only=True)
 args.root_path = str(resolve_repo_path(args.root_path))
 args.checkpoints = str(resolve_repo_path(args.checkpoints))
 if not args.llm_model_path:

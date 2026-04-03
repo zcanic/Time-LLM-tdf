@@ -172,7 +172,7 @@ class Model(nn.Module):
             pad_token = '[PAD]'
             self.tokenizer.add_special_tokens({'pad_token': pad_token})
             self.tokenizer.pad_token = pad_token
-        special_prompt_tokens = {'additional_special_tokens': ['<|start_prompt|>', '<|<end_prompt>|>']}
+        special_prompt_tokens = {'additional_special_tokens': ['<|start_prompt|>', '<|end_prompt|>']}
         added_tokens = self.tokenizer.add_special_tokens(special_prompt_tokens)
         if added_tokens > 0 or self.llm_model.get_input_embeddings().num_embeddings != len(self.tokenizer):
             self.llm_model.resize_token_embeddings(len(self.tokenizer))
@@ -251,7 +251,7 @@ class Model(nn.Module):
                 f"median value {median_values_str}, "
                 f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
                 f"top {self.top_k} lags are : {lags_values_str}. "
-                f"Observed context: {sample_prompt_context}<|<end_prompt>|>"
+                f"Observed context: {sample_prompt_context}<|end_prompt|>"
             )
 
             prompt.append(prompt_)

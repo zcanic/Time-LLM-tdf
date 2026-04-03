@@ -608,7 +608,7 @@ class Dataset_M4(Dataset):
         insample_mask = np.zeros((len(self.timeseries), self.seq_len))
         for i, ts in enumerate(self.timeseries):
             ts_last_window = ts[-self.seq_len:]
-            insample[i, -len(ts):] = ts_last_window
-            insample_mask[i, -len(ts):] = 1.0
+            insample[i, -len(ts_last_window):] = ts_last_window
+            insample_mask[i, -len(ts_last_window):] = 1.0
         return insample, insample_mask
 

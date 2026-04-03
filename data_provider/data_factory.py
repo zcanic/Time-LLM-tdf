@@ -1,5 +1,8 @@
 from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_M4
 from torch.utils.data import DataLoader
+import numpy as np
+import random
+import torch
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
@@ -11,6 +14,28 @@ data_dict = {
     'Weather': Dataset_Custom,
     'm4': Dataset_M4,
 }
+
+
+def _build_loader_generator(args, flag):
+    generator = torch.Generator()
+    base_seed = int(getattr(args, 'seed', 2021))
+    offset_map = {'train': 0, 'val': 1, 'test': 2}
+    generator.manual_seed(base_seed + offset_map.get(flag, 0))
+    return generator
+
+
+def _build_worker_init_fn(args, flag):
+    base_seed = int(getattr(args, 'seed', 2021))
+    offset_map = {'train': 0, 'val': 1, 'test': 2}
+    flag_offset = offset_map.get(flag, 0) * 1000
+
+    def _seed_worker(worker_id):
+        worker_seed = base_seed + flag_offset + worker_id
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
+
+    return _seed_worker
 
 
 def data_provider(args, flag):
@@ -75,5 +100,8 @@ def data_provider(args, flag):
         batch_size=batch_size,
         shuffle=shuffle_flag,
         num_workers=args.num_workers,
-        drop_last=drop_last)
+        drop_last=drop_last,
+        worker_init_fn=_build_worker_init_fn(args, flag),
+        generator=_build_loader_generator(args, flag),
+    )
     return data_set, data_loader

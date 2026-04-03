@@ -88,6 +88,37 @@
   `data_provider/data_loader.py` modified
   `models/TimeLLM.py` modified
   `change.md` modified
+- Added a final academic-hardening pass for reproducibility and legacy evaluation correctness after the strict audit surfaced experiment-integrity gaps.
+- Purpose: remove the remaining sources of hidden non-determinism and stale evaluation bugs before treating results as serious academic evidence.
+- Impact: `run_main.py` now actually applies `--seed` to Python / NumPy / Torch (including CUDA when available); `data_provider/data_factory.py` now seeds DataLoader generators and worker processes deterministically per split; `utils/tools.py:test()` now uses a valid `(pred, true)` criterion call instead of the broken legacy signature; and `Dataset_M4.last_insample_window()` now uses the correct last-window slice length.
+- Files used:
+  `run_main.py` modified
+  `data_provider/data_factory.py` modified
+  `utils/tools.py` modified
+  `data_provider/data_loader.py` modified
+  `change.md` modified
+- Added a final determinism-and-evaluation hardening pass after the Oracle follow-up review.
+- Purpose: close the last remaining gaps that could weaken academic reproducibility claims or make auxiliary evaluation paths disagree with the main training path.
+- Impact: `run_main.py` now enables deterministic CUDA/cuDNN behavior where available and requests deterministic Torch algorithms with warnings instead of silent nondeterminism; `utils/tools.py:test()` now slices `MS` outputs using the same explicit `target_channel_index` contract as train/validation instead of relying on `-1`.
+- Files used:
+  `run_main.py` modified
+  `utils/tools.py` modified
+  `change.md` modified
+- Propagated the final determinism hardening beyond `run_main.py` and cleaned the prompt boundary token naming.
+- Purpose: avoid leaving parallel entrypoints with weaker reproducibility settings and remove a code-level prompt-token oddity that could distract reviewers.
+- Impact: `run_pretrain.py` and `run_m4.py` now apply the same seed/CUDA determinism setup as the hardened main path; `run_main.py` now also sets `CUBLAS_WORKSPACE_CONFIG` by default; and `models/TimeLLM.py` now uses the cleaner `<|end_prompt|>` marker consistently in both tokenizer registration and prompt construction.
+- Files used:
+  `run_main.py` modified
+  `run_pretrain.py` modified
+  `run_m4.py` modified
+  `models/TimeLLM.py` modified
+  `change.md` modified
+- Closed the last reproducibility gap identified by Oracle in the pretraining data factory.
+- Purpose: avoid leaving the pretraining path with weaker determinism guarantees than the main and M4 entrypoints.
+- Impact: `data_provider_pretrain/data_factory.py` now seeds DataLoader generators and worker processes deterministically per split, matching the hardened behavior already used in `data_provider/data_factory.py`.
+- Files used:
+  `data_provider_pretrain/data_factory.py` modified
+  `change.md` modified
 - Switched the recommended park-data backbone from GPT-2 to Chinese RoBERTa while keeping the adaptation on the existing BERT-compatible code path.
 - Purpose: improve Chinese prompt understanding for traffic/environment/weather/holiday context on RTX 4060 8G without introducing a heavier new-model integration.
 - Impact: the `park_featured` profile now defaults to `llm_model=BERT` with `llm_model_path=tokenizer_path=hfl/chinese-roberta-wwm-ext` and keeps `llm_dim=768`, while `plan.md` now reflects Chinese RoBERTa as the recommended first real Time-LLM backbone for this dataset.
@@ -115,6 +146,31 @@
 - Files used:
   `xgb问题.md` deleted
   `data_process_and_data_to_use/xgb_特征集/xgb_features_tmp.csv` deleted
+  `change.md` modified
+- Refreshed the XGBoost baseline after the time-feature expansion, added a true-vs-predict diagnostic plot, and cleared old baseline artifacts before rerunning.
+- Purpose: retrain the baseline on the updated feature table, avoid confusing old outputs with the new run, and provide a direct visual comparison between true and predicted test-series values.
+- Impact: `baseline_xgb/train_xgb.py` now uses the new timestamp-derived XGB features and writes `true_vs_predict_h1row.png` alongside the existing diagnostics; old baseline model/metric/prediction/png artifacts are removed before the rerun so the folder reflects the latest training only.
+- Files used:
+  `baseline_xgb/train_xgb.py` modified
+  `baseline_xgb/metrics.json` deleted
+  `baseline_xgb/metrics_h1row.json` modified
+  `baseline_xgb/predictions.csv` deleted
+  `baseline_xgb/predictions_h1row.csv` modified
+  `baseline_xgb/residual_vs_target.png` deleted
+  `baseline_xgb/residual_vs_target_h1row.png` modified
+  `baseline_xgb/training_curve.png` deleted
+  `baseline_xgb/training_curve_h1row.png` modified
+  `baseline_xgb/true_vs_predict_h1row.png` added
+  `baseline_xgb/xgb_model.json` deleted
+  `baseline_xgb/xgb_model_h1row.json` modified
+  `change.md` modified
+- Updated the field dictionary document to match the latest XGBoost feature table and baseline outputs.
+- Purpose: remove stale documentation after adding timestamp-derived time features to `xgb_features.csv` and adding `true_vs_predict_h1row.png` to the baseline outputs.
+- Impact: `字段说明.md` now documents the new `year/month/day/park-slot` features, the current 33-feature XGBoost training whitelist, and the meaning of the latest baseline output files.
+- Files used:
+  `字段说明.md` modified
+  `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` reviewed
+  `baseline_xgb/train_xgb.py` reviewed
   `change.md` modified
 - Implemented the first real park-data Time-LLM adaptation path around `park_featured_data.csv` using GPT-2-friendly prompt/context and Baidu-derived numeric covariates.
 - Purpose: move from framework-only repair to an actual runnable custom-data training path that matches the agreed experiment style for Tiantan park forecasting.

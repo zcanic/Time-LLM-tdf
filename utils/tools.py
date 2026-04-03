@@ -415,15 +415,18 @@ def test(args, accelerator, model, train_loader, vali_loader, criterion):
             )
         accelerator.wait_for_everyone()
         outputs = accelerator.gather_for_metrics(outputs)
-        f_dim = -1 if args.features == 'MS' else 0
+        f_dim = int(getattr(args, 'target_channel_index', args.enc_in - 1)) if args.features == 'MS' else 0
+        if outputs.shape[-1] <= f_dim:
+            raise ValueError(
+                f'Target channel index {f_dim} is out of bounds for test outputs {tuple(outputs.shape)}.'
+            )
         outputs = outputs[:, -args.pred_len:, f_dim:]
-        pred = outputs
+        pred = outputs[:, :, 0]
         true = torch.from_numpy(np.array(y)).to(accelerator.device)
-        batch_y_mark = torch.ones(true.shape).to(accelerator.device)
         true = accelerator.gather_for_metrics(true)
-        batch_y_mark = accelerator.gather_for_metrics(batch_y_mark)
+        true = true[:, :args.pred_len]
 
-        loss = criterion(x[:, :, 0], args.frequency_map, pred[:, :, 0], true, batch_y_mark)
+        loss = criterion(pred, true)
 
     model.train()
     return loss
