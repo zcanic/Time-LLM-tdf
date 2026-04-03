@@ -79,6 +79,22 @@
 - Files used:
   `plan.md` modified
   `change.md` modified
+- Completed a strict reviewer-style audit of the park-featured Time-LLM input/output pipeline and hardened the last semantics-sensitive edges.
+- Purpose: make the adapted training path defensible not just operationally, but also under detailed methodological review.
+- Impact: the pipeline now enforces unique/monotonic timestamps for the single-series setup, makes the target channel contract explicit via `target_channel_index`, uses that explicit index in both training and validation slicing, moves validation targets onto the accelerator device before metric gathering, registers prompt boundary tokens as tokenizer special tokens, resizes embeddings when needed, and explicitly states that the current task is next-observed-row forecasting on an intra-day 15-minute grid with overnight closure gaps.
+- Files used:
+  `run_main.py` modified
+  `utils/tools.py` modified
+  `data_provider/data_loader.py` modified
+  `models/TimeLLM.py` modified
+  `change.md` modified
+- Switched the recommended park-data backbone from GPT-2 to Chinese RoBERTa while keeping the adaptation on the existing BERT-compatible code path.
+- Purpose: improve Chinese prompt understanding for traffic/environment/weather/holiday context on RTX 4060 8G without introducing a heavier new-model integration.
+- Impact: the `park_featured` profile now defaults to `llm_model=BERT` with `llm_model_path=tokenizer_path=hfl/chinese-roberta-wwm-ext` and keeps `llm_dim=768`, while `plan.md` now reflects Chinese RoBERTa as the recommended first real Time-LLM backbone for this dataset.
+- Files used:
+  `utils/tools.py` modified
+  `plan.md` modified
+  `change.md` modified
 - Implemented the first real park-data Time-LLM adaptation path around `park_featured_data.csv` using GPT-2-friendly prompt/context and Baidu-derived numeric covariates.
 - Purpose: move from framework-only repair to an actual runnable custom-data training path that matches the agreed experiment style for Tiantan park forecasting.
 - Impact: `run_main.py` now supports a `park_featured` dataset profile plus explicit numeric/prompt/dropna column controls; `Dataset_Custom` can split numeric covariates from prompt-context columns, drop rows with missing required Baidu-derived features before windowing, and emit observed-window prompt text; `TimeLLM.py` now accepts per-batch prompt context so traffic/environment/weather/holiday information from the observed window is injected into GPT-2 prompts alongside the numeric time-series statistics.

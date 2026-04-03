@@ -274,8 +274,10 @@ def apply_dataset_profile(args):
     args.freq = '15min'
     args.prompt_domain = 1
     args.model = 'TimeLLM'
-    args.llm_model = 'GPT2'
+    args.llm_model = 'BERT'
     args.llm_dim = 768
+    args.llm_model_path = 'hfl/chinese-roberta-wwm-ext'
+    args.tokenizer_path = 'hfl/chinese-roberta-wwm-ext'
 
     if not getattr(args, 'numeric_feature_cols', ''):
         args.numeric_feature_cols = ','.join([

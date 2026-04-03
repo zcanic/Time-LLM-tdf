@@ -44,7 +44,7 @@ Recommended current choice:
 - source table for Time-LLM adaptation: `data_process_and_data_to_use/park_featured_data.csv`
 - target: `number`
 - first horizon: one-step row forecasting, then expand only after the first run is stable
-- current implemented Time-LLM profile: `dataset_profile=park_featured`, `llm_model=GPT2`, `features=MS`, `custom_date_col=时间戳`
+- current implemented Time-LLM profile: `dataset_profile=park_featured`, `llm_model=BERT` with `hfl/chinese-roberta-wwm-ext`, `features=MS`, `custom_date_col=时间戳`
 
 Why this is still necessary:
 - the repo is now configurable enough, but your experiment will still be ambiguous unless the exact training table and target horizon are fixed first
@@ -115,12 +115,12 @@ Still needed:
 - create the actual custom-data launch command for:
   - XGBoost baseline
   - DLinear baseline
-  - Time-LLM with GPT-2
+  - Time-LLM with Chinese RoBERTa
 - set batch size, eval batch size, sequence window, horizon, and split dates explicitly
 - keep DeepSpeed disabled for the first smoke run
 
 Recommended first Time-LLM hardware setup:
-- `llm_model=GPT2`
+- `llm_model=BERT` with `hfl/chinese-roberta-wwm-ext`
 - single process
 - no DeepSpeed
 - conservative `seq_len`
@@ -128,7 +128,7 @@ Recommended first Time-LLM hardware setup:
 
 Current implemented first-run direction:
 - `run_main.py` now supports `dataset_profile=park_featured`
-- this profile auto-prepares `model=TimeLLM`, `llm_model=GPT2`, `llm_dim=768`, `root_path=data_process_and_data_to_use`, `data_path=park_featured_data.csv`, timestamp ordering, the Baidu numeric whitelist, prompt context columns, and missing-Baidu row filtering
+- this profile auto-prepares `model=TimeLLM`, `llm_model=BERT`, `llm_model_path=hfl/chinese-roberta-wwm-ext`, `tokenizer_path=hfl/chinese-roberta-wwm-ext`, `llm_dim=768`, `root_path=data_process_and_data_to_use`, `data_path=park_featured_data.csv`, timestamp ordering, the Baidu numeric whitelist, prompt context columns, and missing-Baidu row filtering
 - the remaining work is to lock the actual experiment command (split dates, seq_len, label_len, pred_len, batch size)
 
 ### 5. Run the comparison ladder in order
