@@ -231,6 +231,10 @@ def infer_data_dims(args, dataset):
     if bool(getattr(args, 'infer_dims', True)) or args.c_out <= 0:
         args.c_out = int(dataset_dim)
 
+    target_channel_index = getattr(dataset, 'target_channel_index', None)
+    if target_channel_index is not None:
+        args.target_channel_index = int(target_channel_index)
+
 
 def default_dataset_description(args):
     dataset_name = getattr(args, 'data', 'dataset')
@@ -244,6 +248,70 @@ def default_dataset_description(args):
     )
 
 
+def parse_column_spec(column_spec):
+    if column_spec is None:
+        return []
+    if isinstance(column_spec, (list, tuple)):
+        return [str(col).strip() for col in column_spec if str(col).strip()]
+    return [part.strip() for part in str(column_spec).split(',') if part.strip()]
+
+
+def apply_dataset_profile(args):
+    profile = getattr(args, 'dataset_profile', '')
+    data_path = str(getattr(args, 'data_path', ''))
+    is_park_profile = profile == 'park_featured' or data_path.endswith('park_featured_data.csv')
+    if not is_park_profile:
+        return
+
+    args.data = 'park_featured'
+    if str(getattr(args, 'data_path', '')) in {'', 'ETTh1.csv'}:
+        args.data_path = 'park_featured_data.csv'
+    if str(getattr(args, 'root_path', '')).endswith('dataset'):
+        args.root_path = str(PROJECT_ROOT / 'data_process_and_data_to_use')
+    args.custom_date_col = args.custom_date_col or '时间戳'
+    args.target = 'number'
+    args.features = 'MS'
+    args.freq = '15min'
+    args.prompt_domain = 1
+    args.model = 'TimeLLM'
+    args.llm_model = 'GPT2'
+    args.llm_dim = 768
+
+    if not getattr(args, 'numeric_feature_cols', ''):
+        args.numeric_feature_cols = ','.join([
+            'feat_baidu_lag1d',
+            'feat_baidu_diff_1d',
+            'feat_baidu_ma_3d',
+            'feat_baidu_ma_7d',
+            'feat_baidu_ma_spread_3d_7d',
+        ])
+    if not getattr(args, 'dropna_feature_cols', ''):
+        args.dropna_feature_cols = args.numeric_feature_cols
+    if not getattr(args, 'prompt_context_cols', ''):
+        args.prompt_context_cols = ','.join([
+            '交通状况',
+            '环境描述',
+            'weather_天气',
+            'weather_最低气温_摄氏度',
+            'weather_平均气温_摄氏度',
+            'weather_最高气温_摄氏度',
+            'weather_总降水量_毫米',
+            'holiday_星期',
+            'holiday_是否周末',
+            'holiday_是否节假日放假',
+            'holiday_节假日名称',
+            'holiday_是否调休上班',
+            'holiday_日期标签',
+        ])
+    if not getattr(args, 'dataset_description', ''):
+        args.dataset_description = (
+            'This dataset records timestamp-ordered Tiantan park visitor-count observations on a 15-minute intra-day grid with overnight closure gaps. '
+            'The target is the next observed-row number value. Prompt context may include observed traffic status, environment description, '
+            'weather conditions, weekday and holiday information from the observed window only. '
+            'Baidu-derived lag features are numeric assistance covariates and rows with missing required Baidu features are excluded.'
+        )
+
+
 def default_llm_source(llm_model):
     model_id_map = {
         'LLAMA': 'huggyllama/llama-7b',
@@ -255,14 +323,25 @@ def default_llm_source(llm_model):
     return model_id_map[llm_model]
 
 
+def unpack_model_batch(batch):
+    if len(batch) == 4:
+        batch_x, batch_y, batch_x_mark, batch_y_mark = batch
+        return batch_x, batch_y, batch_x_mark, batch_y_mark, None
+    if len(batch) == 5:
+        batch_x, batch_y, batch_x_mark, batch_y_mark, prompt_context = batch
+        return batch_x, batch_y, batch_x_mark, batch_y_mark, prompt_context
+    raise ValueError(f'Unexpected batch structure length: {len(batch)}')
+
+
 def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric):
     total_loss = []
     total_mae_loss = []
     model.eval()
     with torch.no_grad():
-        for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in tqdm(enumerate(vali_loader)):
+        for i, batch in tqdm(enumerate(vali_loader)):
+            batch_x, batch_y, batch_x_mark, batch_y_mark, prompt_context = unpack_model_batch(batch)
             batch_x = batch_x.float().to(accelerator.device)
-            batch_y = batch_y.float()
+            batch_y = batch_y.float().to(accelerator.device)
 
             batch_x_mark = batch_x_mark.float().to(accelerator.device)
             batch_y_mark = batch_y_mark.float().to(accelerator.device)
@@ -275,20 +354,24 @@ def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric
             if args.use_amp:
                 with torch.cuda.amp.autocast():
                     if args.output_attention:
-                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)[0]
                     else:
-                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)
             else:
                 if args.output_attention:
-                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)[0]
                 else:
-                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)
 
             outputs, batch_y = accelerator.gather_for_metrics((outputs, batch_y))
 
-            f_dim = -1 if args.features == 'MS' else 0
+            f_dim = int(getattr(args, 'target_channel_index', args.enc_in - 1)) if args.features == 'MS' else 0
+            if outputs.shape[-1] <= f_dim or batch_y.shape[-1] <= f_dim:
+                raise ValueError(
+                    f'Target channel index {f_dim} is out of bounds for outputs {tuple(outputs.shape)} and batch_y {tuple(batch_y.shape)}.'
+                )
             outputs = outputs[:, -args.pred_len:, f_dim:]
-            batch_y = batch_y[:, -args.pred_len:, f_dim:].to(accelerator.device)
+            batch_y = batch_y[:, -args.pred_len:, f_dim:]
 
             pred = outputs.detach()
             true = batch_y.detach()

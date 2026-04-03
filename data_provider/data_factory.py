@@ -66,6 +66,9 @@ def data_provider(args, flag):
             val_end_date=getattr(args, 'val_end_date', ''),
             custom_date_col=args.custom_date_col,
             channel_independence=args.channel_independence,
+            numeric_feature_cols=getattr(args, 'numeric_feature_cols', ''),
+            prompt_context_cols=getattr(args, 'prompt_context_cols', ''),
+            dropna_feature_cols=getattr(args, 'dropna_feature_cols', ''),
         )
     data_loader = DataLoader(
         data_set,

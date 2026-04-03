@@ -172,6 +172,10 @@ class Model(nn.Module):
             pad_token = '[PAD]'
             self.tokenizer.add_special_tokens({'pad_token': pad_token})
             self.tokenizer.pad_token = pad_token
+        special_prompt_tokens = {'additional_special_tokens': ['<|start_prompt|>', '<|<end_prompt>|>']}
+        added_tokens = self.tokenizer.add_special_tokens(special_prompt_tokens)
+        if added_tokens > 0 or self.llm_model.get_input_embeddings().num_embeddings != len(self.tokenizer):
+            self.llm_model.resize_token_embeddings(len(self.tokenizer))
 
         for param in self.llm_model.parameters():
             param.requires_grad = False
@@ -206,17 +210,21 @@ class Model(nn.Module):
 
         self.normalize_layers = Normalize(configs.enc_in, affine=False)
 
-    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
+    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None, prompt_context=None):
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
+            dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec, prompt_context=prompt_context)
             return dec_out[:, -self.pred_len:, :]
         return None
 
-    def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+    def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec, prompt_context=None):
 
         x_enc = self.normalize_layers(x_enc, 'norm')
 
         B, T, N = x_enc.size()
+        if prompt_context is not None and len(prompt_context) != B:
+            raise ValueError(
+                f'prompt_context length ({len(prompt_context)}) must equal batch size ({B}) before channel flattening.'
+            )
         x_enc = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
 
         min_values = torch.min(x_enc, dim=1)[0]
@@ -231,6 +239,9 @@ class Model(nn.Module):
             max_values_str = str(max_values[b].tolist()[0])
             median_values_str = str(medians[b].tolist()[0])
             lags_values_str = str(lags[b].tolist())
+            sample_prompt_context = ''
+            if prompt_context is not None:
+                sample_prompt_context = str(prompt_context[b // N])
             prompt_ = (
                 f"<|start_prompt|>Dataset description: {self.description}"
                 f"Task description: forecast the next {str(self.pred_len)} steps given the previous {str(self.seq_len)} steps information; "
@@ -239,7 +250,8 @@ class Model(nn.Module):
                 f"max value {max_values_str}, "
                 f"median value {median_values_str}, "
                 f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
-                f"top {self.top_k} lags are : {lags_values_str}<|<end_prompt>|>"
+                f"top {self.top_k} lags are : {lags_values_str}. "
+                f"Observed context: {sample_prompt_context}<|<end_prompt>|>"
             )
 
             prompt.append(prompt_)

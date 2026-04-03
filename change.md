@@ -79,6 +79,41 @@
 - Files used:
   `plan.md` modified
   `change.md` modified
+- Implemented the first real park-data Time-LLM adaptation path around `park_featured_data.csv` using GPT-2-friendly prompt/context and Baidu-derived numeric covariates.
+- Purpose: move from framework-only repair to an actual runnable custom-data training path that matches the agreed experiment style for Tiantan park forecasting.
+- Impact: `run_main.py` now supports a `park_featured` dataset profile plus explicit numeric/prompt/dropna column controls; `Dataset_Custom` can split numeric covariates from prompt-context columns, drop rows with missing required Baidu-derived features before windowing, and emit observed-window prompt text; `TimeLLM.py` now accepts per-batch prompt context so traffic/environment/weather/holiday information from the observed window is injected into GPT-2 prompts alongside the numeric time-series statistics.
+- Files used:
+  `run_main.py` modified
+  `data_provider/data_factory.py` modified
+  `data_provider/data_loader.py` modified
+  `models/TimeLLM.py` modified
+  `utils/tools.py` modified
+  `plan.md` modified
+  `change.md` modified
+- Tightened the `park_featured` dataset profile so the custom-data adaptation is runnable by default instead of relying on manual launch hygiene.
+- Purpose: remove the last profile-level footguns before the actual park-data training kickoff.
+- Impact: `dataset_profile=park_featured` now auto-selects `model=TimeLLM`, `llm_model=GPT2`, `llm_dim=768`, `root_path=data_process_and_data_to_use`, `data_path=park_featured_data.csv`, and the rest of the park-specific prompt/numeric/dropna defaults, while `plan.md` now reflects those runnable defaults explicitly.
+- Files used:
+  `utils/tools.py` modified
+  `plan.md` modified
+  `change.md` modified
+- Hardened the park-data adaptation against reviewer-level pipeline objections around metric gathering, target-channel selection, and prompt tokenization.
+- Purpose: make the adapted training path not only runnable, but also explicit and defensible when someone audits the exact input/output semantics.
+- Impact: `Dataset_Custom` now exposes an explicit `target_channel_index` / `model_feature_cols` contract instead of relying on an implicit “last column” assumption; `run_main.py` and `utils/tools.py` now slice targets using that explicit index; validation now gathers tensors on a consistent device; and `TimeLLM.py` now registers prompt boundary tokens with the tokenizer, resizes embeddings if needed, and asserts that `prompt_context` length matches the pre-flatten batch size.
+- Files used:
+  `data_provider/data_loader.py` modified
+  `run_main.py` modified
+  `utils/tools.py` modified
+  `models/TimeLLM.py` modified
+  `change.md` modified
+- Tightened the reviewer-facing validity semantics for the park-data path after the strict pipeline audit.
+- Purpose: remove the remaining ambiguities a strict reviewer could reasonably challenge in the adapted training path.
+- Impact: `Dataset_Custom` now explicitly enforces unique and monotonic timestamps for the single-series setup; the park profile description now states that the task is next-observed-row forecasting on an intra-day 15-minute grid with overnight closure gaps; and both training and validation now raise explicit errors if the selected target channel index does not match the model output / batch target shapes.
+- Files used:
+  `data_provider/data_loader.py` modified
+  `run_main.py` modified
+  `utils/tools.py` modified
+  `change.md` modified
 - Extended `plan.md` to allow engineered forecasting features while explicitly requiring all rolling windows to be backward-only.
 - Purpose: capture the new feature-engineering direction without weakening the leakage rules.
 - Impact: the plan now treats momentum, moving-average, slope, volatility, and relative-position features as optional later-stage numeric features under strict past-only window constraints.
@@ -207,6 +242,16 @@
   `baseline_xgb/training_curve_h1row.png` added
   `baseline_xgb/xgb_model_h1row.json` added
   `change.md` modified
+- Added a dedicated field dictionary document for the two main feature CSV files.
+- Purpose: make review, debugging, and later model work easier by documenting each field's source, meaning, encoding, rolling-window semantics, NaN behavior, and training-use boundary in one place.
+- Impact: the repo now has a detailed reference for `park_featured_data.csv` and `xgb_features.csv`, reducing ambiguity about which columns are raw, engineered, encoded, safe, or training-selected.
+- Files used:
+  `字段说明.md` added
+  `data_process_and_data_to_use/build_features.py` reviewed
+  `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` reviewed
+  `data_process_and_data_to_use/park_featured_data.csv` reviewed
+  `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` reviewed
+  `change.md` modified
 - Finalized the forecasting-baseline repair by cleaning remaining type-safety hotspots in sample filtering/output rename and updating the XGBoost issue log to reflect that blocking items are resolved.
 - Purpose: close the remaining correctness gap so the repaired baseline is both forecasting-semantic and cleaner under static checks/document review.
 - Impact: `baseline_xgb/train_xgb.py` now uses an explicit valid-row mask workflow for training-frame construction, reports separate drop statistics for horizon-tail and feature-NaN filtering, and writes predictions with a stable timestamp formatting path under clean static diagnostics; `xgb问题.md` now records resolved status instead of open blockers.
@@ -266,4 +311,10 @@
   `data_provider_pretrain/data_loader.py` modified
   `models/TimeLLM.py` modified
   `problems.md` deleted
+  `change.md` modified
+- Updated `plan.md` to reflect that the framework-repair phase is largely complete and to define the remaining experiment-wiring steps before your own data can be run end-to-end.
+- Purpose: shift the project plan from “fix training infrastructure” to “freeze experiment table, split dates, feature whitelist, and launch order” so the next work starts the real park-data run instead of repeating framework cleanup.
+- Impact: `plan.md` now explicitly distinguishes finished pipeline repairs from the remaining launch-preparation tasks (authoritative table selection, horizon choice, chronological split locking, XGBoost/DLinear/Time-LLM execution order, and conservative first-run settings for RTX 4060 8G).
+- Files used:
+  `plan.md` modified
   `change.md` modified

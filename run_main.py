@@ -20,8 +20,10 @@ from utils.tools import (
     default_dataset_description,
     infer_data_dims,
     load_content,
+    apply_dataset_profile,
     resolve_repo_path,
     default_llm_source,
+    unpack_model_batch,
     vali,
 )
 
@@ -44,6 +46,7 @@ parser.add_argument('--seed', type=int, default=2021, help='random seed')
 
 # data loader
 parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
+parser.add_argument('--dataset_profile', type=str, default='', help='optional dataset profile, e.g. park_featured')
 parser.add_argument('--root_path', type=str, default=str(resolve_repo_path('dataset')), help='root path of the data file')
 parser.add_argument('--data_path', type=str, default='ETTh1.csv', help='data file')
 parser.add_argument('--features', type=str, default='M',
@@ -64,6 +67,9 @@ parser.add_argument('--train_end_date', type=str, default='', help='optional inc
 parser.add_argument('--val_end_date', type=str, default='', help='optional inclusive validation end date for custom datasets')
 parser.add_argument('--custom_date_col', type=str, default='', help='optional timestamp column name for custom datasets')
 parser.add_argument('--channel_independence', type=int, default=0, help='1: one channel per sample, 0: keep all channels together')
+parser.add_argument('--numeric_feature_cols', type=str, default='', help='comma-separated numeric covariate columns to keep in the encoder input')
+parser.add_argument('--prompt_context_cols', type=str, default='', help='comma-separated observed-window columns to summarize into prompt context')
+parser.add_argument('--dropna_feature_cols', type=str, default='', help='comma-separated columns that must be non-null before a row is eligible for training')
 
 # forecasting task
 parser.add_argument('--seq_len', type=int, default=-1, help='input sequence length; set explicitly for reproducible runs')
@@ -129,6 +135,7 @@ parser.add_argument('--find_unused_parameters', type=int, default=1, help='DDP f
 parser.add_argument('--cleanup_checkpoints', type=int, default=0, help='delete only this run checkpoint directory after finishing')
 
 args = parser.parse_args()
+apply_dataset_profile(args)
 args.root_path = str(resolve_repo_path(args.root_path))
 args.checkpoints = str(resolve_repo_path(args.checkpoints))
 if not args.llm_model_path:
@@ -165,6 +172,8 @@ for ii in range(args.itr):
     test_data, test_loader = data_provider(args, 'test')
 
     infer_data_dims(args, train_data)
+    if not hasattr(args, 'target_channel_index'):
+        args.target_channel_index = args.enc_in - 1
     args.content = load_content(args)
     if not args.dataset_description:
         args.dataset_description = default_dataset_description(args)
@@ -218,9 +227,11 @@ for ii in range(args.itr):
 
         model.train()
         epoch_time = time.time()
-        for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in tqdm(enumerate(train_loader)):
+        for i, batch in tqdm(enumerate(train_loader)):
             iter_count += 1
             model_optim.zero_grad()
+
+            batch_x, batch_y, batch_x_mark, batch_y_mark, prompt_context = unpack_model_batch(batch)
 
             batch_x = batch_x.float().to(accelerator.device)
             batch_y = batch_y.float().to(accelerator.device)
@@ -237,22 +248,30 @@ for ii in range(args.itr):
             if args.use_amp:
                 with torch.cuda.amp.autocast():
                     if args.output_attention:
-                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)[0]
                     else:
-                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)
 
-                    f_dim = -1 if args.features == 'MS' else 0
+                    f_dim = int(getattr(args, 'target_channel_index', args.enc_in - 1)) if args.features == 'MS' else 0
+                    if outputs.shape[-1] <= f_dim or batch_y.shape[-1] <= f_dim:
+                        raise ValueError(
+                            f'Target channel index {f_dim} is out of bounds for outputs {tuple(outputs.shape)} and batch_y {tuple(batch_y.shape)}.'
+                        )
                     outputs = outputs[:, -args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -args.pred_len:, f_dim:].to(accelerator.device)
                     loss = criterion(outputs, batch_y)
                     train_loss.append(loss.item())
             else:
                 if args.output_attention:
-                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)[0]
                 else:
-                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark, prompt_context=prompt_context)
 
-                f_dim = -1 if args.features == 'MS' else 0
+                f_dim = int(getattr(args, 'target_channel_index', args.enc_in - 1)) if args.features == 'MS' else 0
+                if outputs.shape[-1] <= f_dim or batch_y.shape[-1] <= f_dim:
+                    raise ValueError(
+                        f'Target channel index {f_dim} is out of bounds for outputs {tuple(outputs.shape)} and batch_y {tuple(batch_y.shape)}.'
+                    )
                 outputs = outputs[:, -args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -args.pred_len:, f_dim:]
                 loss = criterion(outputs, batch_y)

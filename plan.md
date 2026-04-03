@@ -9,6 +9,141 @@ Use Time-LLM to predict the `number` column from the Tiantan park base table, wh
 - avoiding future information leakage
 - fitting a practical setup for an RTX 4060 8G machine
 
+## Current Readiness Snapshot
+
+Current state after the recent pipeline repairs:
+- custom dataset names are now supported without editing `data_dict`
+- prompt loading is optional and configurable
+- `enc_in` / `dec_in` / `c_out` can be inferred from the dataset
+- `Dataset_Custom` now supports explicit date-based splits and common date column aliases
+- validation/test loaders are deterministic and non-dropping
+- benchmark-only runtime assumptions in the main training entries have been reduced
+- `problems.md` has been retired because the tracked training-pipeline blockers were fixed
+- the main training path now has a first real park-data adaptation path for `park_featured_data.csv`
+
+Meaning:
+- the repository is now much closer to a usable custom-data training entry
+- the remaining work is no longer “repair the framework,” but “connect your specific dataset and run the actual experiment sequence safely”
+
+## What Still Remains Before Your Data Can Start Running
+
+These are the remaining practical steps before your own data can be used end-to-end.
+
+### 1. Freeze the exact training table contract
+
+Still needed:
+- finalize which CSV is the authoritative training-facing table
+- freeze the exact column whitelist for each stage:
+  - XGBoost baseline
+  - Time-LLM numeric branch
+  - Time-LLM prompt/context branch
+- freeze the forecast target and forecast horizon in row units
+
+Recommended current choice:
+- source table for structured baselines: `data_process_and_data_to_use/xgb_特征集/xgb_features.csv`
+- source table for Time-LLM adaptation: `data_process_and_data_to_use/park_featured_data.csv`
+- target: `number`
+- first horizon: one-step row forecasting, then expand only after the first run is stable
+- current implemented Time-LLM profile: `dataset_profile=park_featured`, `llm_model=GPT2`, `features=MS`, `custom_date_col=时间戳`
+
+Why this is still necessary:
+- the repo is now configurable enough, but your experiment will still be ambiguous unless the exact training table and target horizon are fixed first
+
+### 2. Freeze the chronological split boundaries for your real experiment
+
+The code now supports ratio-based and explicit date-based splits, but the actual experiment split still needs to be chosen.
+
+Still needed:
+- define the real train/validation/test cut dates for your park data
+- write those dates into the actual launch command or config used for the run
+- keep them fixed across XGBoost, DLinear, and Time-LLM so comparisons stay fair
+
+Hard rule:
+- do not switch back to generic random ratio splitting for the final experiment
+
+### 3. Finalize the first-run feature whitelist
+
+For XGBoost:
+- keep the whitelist explicit and small
+- use the current repaired forecasting baseline as the reference structured model
+
+For Time-LLM:
+- first run should remain conservative
+- numeric branch should stay small and leakage-auditable
+- prompt branch should use only observed-side context
+
+Recommended first Time-LLM numeric set:
+- `number`
+- `feat_baidu_lag1d`
+- a very small audited subset of `feat_number_*` features
+
+Current implemented numeric branch default for the park profile:
+- `number` as target/history channel
+- `feat_baidu_lag1d`
+- `feat_baidu_diff_1d`
+- `feat_baidu_ma_3d`
+- `feat_baidu_ma_7d`
+- `feat_baidu_ma_spread_3d_7d`
+
+Current implemented missing-value rule:
+- rows with missing required Baidu-derived numeric features are dropped before split and window extraction
+- this removes the early part of the table where lagged Baidu features are not yet valid
+
+Recommended first prompt/context set:
+- holiday metadata
+- weather metadata only if treated as observed-window context
+- traffic/environment text only from the observed side
+
+Current implemented prompt/context content for the park profile:
+- latest observed `交通状况`
+- recent traffic counts inside the observed window
+- latest observed `环境描述`
+- latest observed weather text and temperature / precipitation summary
+- latest observed `holiday_星期`
+- latest observed `holiday_日期标签`
+- latest observed weekend / holiday / makeup-workday flags
+
+Prompt construction rule now implemented:
+- prompt text is built from the observed input window only
+- future rows are not used when composing the prompt context
+
+### 4. Prepare the first real launch command for your hardware
+
+The framework now supports a safer local path, but the exact first run command is still missing.
+
+Still needed:
+- create the actual custom-data launch command for:
+  - XGBoost baseline
+  - DLinear baseline
+  - Time-LLM with GPT-2
+- set batch size, eval batch size, sequence window, horizon, and split dates explicitly
+- keep DeepSpeed disabled for the first smoke run
+
+Recommended first Time-LLM hardware setup:
+- `llm_model=GPT2`
+- single process
+- no DeepSpeed
+- conservative `seq_len`
+- small batch size
+
+Current implemented first-run direction:
+- `run_main.py` now supports `dataset_profile=park_featured`
+- this profile auto-prepares `model=TimeLLM`, `llm_model=GPT2`, `llm_dim=768`, `root_path=data_process_and_data_to_use`, `data_path=park_featured_data.csv`, timestamp ordering, the Baidu numeric whitelist, prompt context columns, and missing-Baidu row filtering
+- the remaining work is to lock the actual experiment command (split dates, seq_len, label_len, pred_len, batch size)
+
+### 5. Run the comparison ladder in order
+
+The safe order is now:
+1. naive last-value baseline
+2. repaired XGBoost forecasting baseline
+3. DLinear baseline from this repo
+4. Time-LLM with numeric-only conservative inputs
+5. Time-LLM with controlled prompt context
+
+This order matters because:
+- it validates the data and split choices before the LLM run cost increases
+- it makes it easier to tell whether Time-LLM is adding real value or only complexity
+
 ## Feasibility Judgment
 
 Yes, this goal is possible.
@@ -291,11 +426,14 @@ Interpretation goal:
 Objective:
 - make Time-LLM consume your aligned park-based dataset without leakage
 
+Status:
+- core framework support is done
+- the remaining work is experiment wiring, not infrastructure rescue
+
 Needed changes:
 - use `park_aligned_data.csv` as the immutable source table
 - define `number` as the only prediction target
-- create a custom loader that builds samples from minute-level rows
-- ensure each sample uses a past window and predicts a future horizon
+- set the first explicit forecast horizon used in the final experiment
 - consume `park_featured_data.csv` as the training-facing feature table
 - keep same-day raw Baidu columns excluded from the training-facing feature table
 - keep engineered features backward-only before sample extraction
@@ -341,11 +479,15 @@ Success criterion:
 Objective:
 - replace benchmark-heavy defaults with a local, minimal training path
 
+Status:
+- framework-side runtime cleanup is done
+- the next step is to choose the actual first launch settings
+
 Needed changes:
 - use GPT-2 first
 - reduce batch size
-- avoid multi-process defaults
-- avoid mandatory DeepSpeed startup for first experiments
+- keep single-process startup
+- keep DeepSpeed disabled for first experiments
 - keep sequence length and prompt size conservative
 
 Success criterion:
@@ -356,8 +498,12 @@ Success criterion:
 Objective:
 - validate the feature table and leakage boundary with a strong non-LLM model first
 
+Status:
+- the repaired XGBoost forecasting baseline now exists
+- what remains is to freeze your final whitelist and split dates for the park experiment
+
 Needed changes:
-- define a strict feature whitelist for tree-based training
+- define the final strict feature whitelist for tree-based training
 - create chronological train/val/test splits on the featured dataset
 - train an `XGBoost` baseline on the structured numeric features
 - compare variants with and without lagged Baidu features
@@ -396,6 +542,21 @@ Baselines to compare:
 - Time-LLM with no Baidu covariate
 - Time-LLM with lagged Baidu covariate
 - Time-LLM with and without prompt context
+
+## Immediate Next Execution Checklist
+
+If the next step is to actually start your data run, the immediate sequence should be:
+
+1. Freeze one authoritative experiment table and one target horizon.
+2. Freeze explicit train/val/test date boundaries.
+3. Freeze the XGBoost whitelist and run the repaired baseline.
+4. Run a DLinear baseline on the same split.
+5. Launch GPT-2 Time-LLM with conservative numeric inputs only.
+6. Add prompt/context only after the numeric-only run is stable.
+
+So the short answer to “距离介入我的数据开跑还剩什么” is:
+- not framework repair anymore
+- only experiment wiring, split locking, feature freezing, and actual baseline execution
 
 Why this matters:
 - it tells you whether a strong tabular model already solves most of the task
