@@ -95,6 +95,27 @@
   `utils/tools.py` modified
   `plan.md` modified
   `change.md` modified
+- Extended the XGBoost feature-export script with explicit timestamp-derived calendar and park-slot cyclical features.
+- Purpose: expose year/month/day and within-business-day timing information to the tree baseline without incorrectly treating the data as a full 24-hour evenly sampled series.
+- Impact: `xgb_features.csv` will now include calendar time features derived from `时间戳`, including month/day cyclical encodings and a dedicated 48-slot park-day cyclical encoding for the 09:00 to 20:45 15-minute grid.
+- Files used:
+  `data_process_and_data_to_use/xgb_特征集/build_xgb_features.py` modified
+  `data_process_and_data_to_use/park_featured_data.csv` reviewed
+  `change.md` modified
+- Regenerated the official XGBoost feature CSV after adding the timestamp-derived calendar and park-slot cyclical features.
+- Purpose: make the checked time-feature extension available in the actual baseline input file instead of only in a temporary validation export.
+- Impact: `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` is now the authoritative tree-model input with the new year/month/day and 48-slot park-time features.
+- Files used:
+  `data_process_and_data_to_use/xgb_特征集/xgb_features_tmp.csv` reviewed
+  `data_process_and_data_to_use/xgb_特征集/xgb_features.csv` modified
+  `change.md` modified
+- Removed the now-obsolete XGBoost issue note and the temporary feature-export CSV used only for overwrite validation.
+- Purpose: keep the repo lean after confirming the repaired XGBoost baseline issues are closed and the official feature CSV has already been regenerated successfully.
+- Impact: `xgb问题.md` is removed because it no longer acts as an active blocker document, and `xgb_features_tmp.csv` is removed because the official `xgb_features.csv` already contains the validated time features.
+- Files used:
+  `xgb问题.md` deleted
+  `data_process_and_data_to_use/xgb_特征集/xgb_features_tmp.csv` deleted
+  `change.md` modified
 - Implemented the first real park-data Time-LLM adaptation path around `park_featured_data.csv` using GPT-2-friendly prompt/context and Baidu-derived numeric covariates.
 - Purpose: move from framework-only repair to an actual runnable custom-data training path that matches the agreed experiment style for Tiantan park forecasting.
 - Impact: `run_main.py` now supports a `park_featured` dataset profile plus explicit numeric/prompt/dropna column controls; `Dataset_Custom` can split numeric covariates from prompt-context columns, drop rows with missing required Baidu-derived features before windowing, and emit observed-window prompt text; `TimeLLM.py` now accepts per-batch prompt context so traffic/environment/weather/holiday information from the observed window is injected into GPT-2 prompts alongside the numeric time-series statistics.

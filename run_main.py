@@ -40,12 +40,12 @@ parser.add_argument('--task_name', type=str, required=True, default='long_term_f
 parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
 parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
 parser.add_argument('--model_comment', type=str, required=True, default='none', help='prefix when saving test results')
-parser.add_argument('--model', type=str, required=True, default='Autoformer',
-                    help='model name, options: [Autoformer, DLinear]')
+parser.add_argument('--model', type=str, required=False, default='Autoformer',
+                    help='model name, options: [Autoformer, DLinear, TimeLLM]')
 parser.add_argument('--seed', type=int, default=2021, help='random seed')
 
 # data loader
-parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
+parser.add_argument('--data', type=str, required=False, default='ETTm1', help='dataset type')
 parser.add_argument('--dataset_profile', type=str, default='', help='optional dataset profile, e.g. park_featured')
 parser.add_argument('--root_path', type=str, default=str(resolve_repo_path('dataset')), help='root path of the data file')
 parser.add_argument('--data_path', type=str, default='ETTh1.csv', help='data file')
