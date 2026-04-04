@@ -1,4 +1,5 @@
 from torch.utils.data import DataLoader
+from functools import partial
 import numpy as np
 import random
 import torch
@@ -22,18 +23,11 @@ def _build_loader_generator(args, flag):
     return generator
 
 
-def _build_worker_init_fn(args, flag):
-    base_seed = int(getattr(args, 'seed', 2021))
-    offset_map = {'train': 0, 'val': 1, 'test': 2}
-    flag_offset = offset_map.get(flag, 0) * 1000
-
-    def _seed_worker(worker_id):
-        worker_seed = base_seed + flag_offset + worker_id
-        random.seed(worker_seed)
-        np.random.seed(worker_seed)
-        torch.manual_seed(worker_seed)
-
-    return _seed_worker
+def _seed_worker_global(worker_id, base_seed, flag_offset):
+    worker_seed = int(base_seed) + int(flag_offset) + int(worker_id)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
 
 
 def data_provider(args, data, data_path, pretrain=True, flag='train'):
@@ -88,7 +82,11 @@ def data_provider(args, data, data_path, pretrain=True, flag='train'):
         shuffle=shuffle_flag,
         num_workers=args.num_workers,
         drop_last=drop_last,
-        worker_init_fn=_build_worker_init_fn(args, flag),
+        worker_init_fn=partial(
+            _seed_worker_global,
+            base_seed=int(getattr(args, 'seed', 2021)),
+            flag_offset={'train': 0, 'val': 1000, 'test': 2000}.get(flag, 0),
+        ),
         generator=_build_loader_generator(args, flag),
     )
     return data_set, data_loader

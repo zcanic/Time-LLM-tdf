@@ -119,6 +119,14 @@
 - Files used:
   `data_provider_pretrain/data_factory.py` modified
   `change.md` modified
+- Fixed the Windows multiprocessing failure that blocked the formal park training command when `num_workers > 0`.
+- Purpose: make the full-data training command actually runnable in the target Windows environment instead of requiring users to silently fall back to `num_workers=0`.
+- Impact: `run_main.py` now uses a standard `if __name__ == '__main__':` + `freeze_support()` entrypoint, and both data factories now use module-level worker seeding functions wrapped with `functools.partial` so the DataLoader worker init logic is pickle-safe under Windows spawn mode.
+- Files used:
+  `run_main.py` modified
+  `data_provider/data_factory.py` modified
+  `data_provider_pretrain/data_factory.py` modified
+  `change.md` modified
 - Switched the recommended park-data backbone from GPT-2 to Chinese RoBERTa while keeping the adaptation on the existing BERT-compatible code path.
 - Purpose: improve Chinese prompt understanding for traffic/environment/weather/holiday context on RTX 4060 8G without introducing a heavier new-model integration.
 - Impact: the `park_featured` profile now defaults to `llm_model=BERT` with `llm_model_path=tokenizer_path=hfl/chinese-roberta-wwm-ext` and keeps `llm_dim=768`, while `plan.md` now reflects Chinese RoBERTa as the recommended first real Time-LLM backbone for this dataset.
